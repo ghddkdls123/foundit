@@ -1,261 +1,123 @@
-import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Check, MailCheck } from 'lucide-react';
+import AuthCard from '../components/AuthCard';
+import { Button, Field, inputClass } from '../components/ui';
+import { api, rememberName } from '../lib/api';
+import useCooldown from '../lib/useCooldown';
+
+// 백엔드 규칙: 8자 이상, 영문+숫자, 72바이트 이하
+function passwordChecks(pw) {
+  const bytes = new TextEncoder().encode(pw).length;
+  return [
+    { ok: pw.length >= 8, label: '8자 이상' },
+    { ok: /[A-Za-z]/.test(pw) && /\d/.test(pw), label: '영문과 숫자 포함' },
+    { ok: bytes <= 72, label: '너무 길지 않게 (한글 24자, 영문 72자 이하)' },
+  ];
+}
 
 export default function SignupGeneral() {
   const navigate = useNavigate();
-  const [formData, setFormData] = useState({
-    name: '',
-    phone: '',
-    verificationCode: '',
-    email: '',
-    password: '',
-  });
+  const [form, setForm] = useState({ name: '', email: '', password: '', confirm: '' });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [done, setDone] = useState(false);
+  const [cooldown, startCooldown] = useCooldown();
 
-  const [isCodeSent, setIsCodeSent] = useState(false);
-  const [isVerified, setIsVerified] = useState(false);
-  const [phoneError, setPhoneError] = useState('');
-  const [authMessage, setAuthMessage] = useState({ text: '', type: '' });
-  const [loading, setLoading]= useState(false);
+  const checks = passwordChecks(form.password);
+  const pwOk = checks.every((c) => c.ok);
+  const confirmOk = form.confirm.length > 0 && form.confirm === form.password;
 
-  const handlePhoneChange = (e) => {
-    const rawValue = e.target.value.replace(/[^0-9]/g, '');
-    
-    if (rawValue.length > 11) return;
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
-    let formattedValue = '';
-
-    if (rawValue.length < 4) {
-      formattedValue = rawValue;
-    } else if (rawValue.length < 7) {
-      formattedValue = `${rawValue.slice(0, 3)}-${rawValue.slice(3)}`;
-    } else if (rawValue.length < 11) {
-      formattedValue = `${rawValue.slice(0, 3)}-${rawValue.slice(3, 6)}-${rawValue.slice(6)}`;
-    } else {
-      formattedValue = `${rawValue.slice(0, 3)}-${rawValue.slice(3, 7)}-${rawValue.slice(7, 11)}`;
-    }
-
-    setFormData({ ...formData, phone: formattedValue });
-
-    if (rawValue.length > 0 && rawValue.length < 11) {
-      setPhoneError('휴대폰 번호 11자리를 모두 입력해주세요.');
-    } else {
-      setPhoneError('');
-    }
-
-    if (rawValue.length < 11) {
-      setIsCodeSent(false);
-      setAuthMessage({ text: '', type: '' });
-    }
-  };
-
-  const handleSendCode = () => {
-    setIsCodeSent(true);
-    setAuthMessage({
-      text: '인증번호가 발송되었습니다. (임시 인증번호: 1234)',
-      type: 'success',
-    });
-  };
-
-  const handleVerifyCode = () => {
-    if (formData.verificationCode === '1234') {
-      setIsVerified(true);
-      setAuthMessage({
-        text: '✓ 전화번호 인증이 완료되었습니다.',
-        type: 'success',
-      });
-    } else {
-      setAuthMessage({
-        text: '인증번호가 일치하지 않습니다. (1234 입력)',
-        type: 'error',
-      });
-    }
-  };
-
-  const handleSubmit = async (e) => {
+  const onSubmit = async (e) => {
     e.preventDefault();
+    if (!pwOk) return setError('비밀번호 조건을 확인해주세요.');
+    if (!confirmOk) return setError('비밀번호가 서로 달라요.');
     setLoading(true);
-
-    try{
-      const response = await fetch('https://d2561q9uqrldal.cloudfront.net/api/auth/signup', {
+    setError('');
+    try {
+      await api('/auth/signup', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email: formData.email,
-          password: formData.password,
-          name: formData.name,
-          phone: formData.phone
-        }),
+        auth: false,
+        body: { name: form.name.trim(), email: form.email.trim(), password: form.password },
       });
-
-      const data = await response.json();
-
-      if (!response.ok){
-        throw new Error(data.message || '회원가입에 실패했습니다.')
-      }
-
-      alert('일반 회원가입이 완료되었습니다!');
-      navigate('/login');
-    
-    } catch (error){
-      console.error('회원가입 통신 에러:', error);
-      alert(error.message || '서버와 연결할 수 없습니다. 네트워크 상태를 확인해 주세요.');
-    }finally{
+      rememberName(form.email, form.name.trim());
+      setDone(true);
+      startCooldown();
+    } catch (err) {
+      setError(err.message);
+    } finally {
       setLoading(false);
     }
   };
 
+  const resend = async () => {
+    try {
+      await api('/auth/email/send', { method: 'POST', auth: false, body: { email: form.email.trim() } });
+      startCooldown();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
 
-  const rawPhoneLength = formData.phone.replace(/[^0-9]/g, '').length;
-  const isPhoneComplete = rawPhoneLength === 11;
+  if (done) {
+    return (
+      <AuthCard subtitle="가입을 환영해요!">
+        <div className="text-center">
+          <span className="mx-auto w-14 h-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center">
+            <MailCheck className="w-7 h-7" />
+          </span>
+          <p className="text-base font-bold text-slate-800 mt-4">인증 메일을 보냈어요</p>
+          <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+            <span className="font-semibold text-slate-700">{form.email}</span> 메일함에서
+            <br />
+            링크를 눌러 이메일 인증을 마쳐주세요. (24시간 유효)
+          </p>
+          <p className="text-[11px] text-slate-400 mt-2">인증 전에도 로그인해서 둘러볼 수 있어요.</p>
+          <Button className="w-full mt-6" onClick={() => navigate('/login')}>로그인하러 가기</Button>
+          <button type="button" disabled={cooldown > 0} onClick={resend} className="mt-3 text-xs font-semibold text-slate-500 disabled:text-slate-300">
+            {cooldown > 0 ? `메일 다시 보내기 (${cooldown}초)` : '메일이 안 왔나요? 다시 보내기'}
+          </button>
+        </div>
+      </AuthCard>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <div className="w-[420px] bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-        
-        <div className="text-center mb-6">
-          <span className="bg-indigo-50 text-indigo-600 text-xs font-semibold px-3 py-1 rounded-full uppercase tracking-wider">
-            AI 분실물 찾기 플랫폼
+    <AuthCard
+      subtitle="회원가입"
+      footer={
+        <>
+          이미 계정이 있으신가요?
+          <Link to="/login" className="font-semibold text-indigo-600 ml-1.5">로그인</Link>
+        </>
+      }
+    >
+      <form onSubmit={onSubmit} className="space-y-4">
+        <Field label="이름">
+          <input required maxLength={50} className={inputClass} value={form.name} onChange={set('name')} placeholder="홍길동" autoComplete="name" />
+        </Field>
+        <Field label="이메일" hint="학교 메일로 가입하면 나중에 기관 인증 때 확인이 쉬워요.">
+          <input type="email" required className={inputClass} value={form.email} onChange={set('email')} placeholder="example@email.com" autoComplete="email" />
+        </Field>
+        <Field label="비밀번호">
+          <input type="password" required className={inputClass} value={form.password} onChange={set('password')} placeholder="••••••••" autoComplete="new-password" />
+          <span className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5">
+            {checks.map((c) => (
+              <span key={c.label} className={`text-[11px] flex items-center gap-0.5 ${c.ok ? 'text-emerald-600' : 'text-slate-400'}`}>
+                <Check className="w-3 h-3" /> {c.label}
+              </span>
+            ))}
           </span>
-          <h1 className="text-2xl font-bold text-slate-800 mt-3">foundit</h1>
-          <p className="text-sm text-slate-500 mt-1">일반 회원가입을 진행합니다.</p>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-400 mb-1 text-left ml-2">이름</label>
-            <input
-              type="text"
-              required
-              placeholder="홍길동"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-400 mb-1 text-left ml-2">전화번호</label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                required
-                maxLength={13}
-                disabled={isVerified}
-                placeholder="010-1234-5678"
-                value={formData.phone}
-                onChange={handlePhoneChange}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && isPhoneComplete && !isVerified) {
-                    e.preventDefault();
-                    handleSendCode();
-                  }
-                }}
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50"
-              />
-              <button
-                type="button"
-                onClick={handleSendCode}
-                disabled={isVerified || !isPhoneComplete}
-                className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-xl transition whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isCodeSent ? '재전송' : '인증요청'}
-              </button>
-            </div>
-            
-            {phoneError && (
-              <p className="text-xs text-rose-500 font-medium text-left mt-1 ml-2">
-                {phoneError}
-              </p>
-            )}
-          </div>
-
-          {isPhoneComplete && isCodeSent && !isVerified && (
-            <div className="animate-fadeIn">
-              <label className="block text-xs font-semibold text-slate-400 mb-1 text-left ml-2">인증번호</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="인증번호 4자리 입력 (1234)"
-                  value={formData.verificationCode}
-                  onChange={(e) => setFormData({ ...formData, verificationCode: e.target.value })}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleVerifyCode();
-                    }
-                  }}
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-                <button
-                  type="button"
-                  onClick={handleVerifyCode}
-                  className="px-4 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-xl transition whitespace-nowrap shadow-sm"
-                >
-                  확인
-                </button>
-              </div>
-            </div>
-          )}
-
-          {authMessage.text && (
-            <p className={`text-xs text-left font-medium mt-1 ml-2 ${authMessage.type === 'error' ? 'text-rose-500' : 'text-emerald-600'}`}>
-              {authMessage.text}
-            </p>
-          )}
-
-          <div
-            className={`transition-all duration-500 ease-in-out ${
-              isVerified ? 'opacity-100 mt-4 space-y-4' : 'opacity-0 max-h-0 pointer-events-none'
-            }`}
-          >
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1 text-left ml-2">이메일</label>
-              <input
-                type="email"
-                required={isVerified}
-                placeholder="example@email.com"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1 text-left ml-2">비밀번호</label>
-              <input
-                type="password"
-                required={isVerified}
-                placeholder="••••••••"
-                value={formData.password}
-                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-          </div>
-
-          {isVerified && (
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl transition text-sm shadow-sm mt-4 animate-fadeIn"
-            >
-              {loading ? '가입 처리 중...' :'가입 완료'}
-            </button>
-          )}
-
-
-        </form>
-
-        <div className="mt-6 pt-6 border-t border-slate-100 text-center">
-          <span className="text-xs text-slate-400">이미 계정이 있으신가요?</span>
-          <Link to="/login" className="text-xs font-semibold text-indigo-600 hover:underline ml-2">
-            로그인하기
-          </Link>
-        </div>
-
-      </div>
-    </div>
+        </Field>
+        <Field label="비밀번호 확인">
+          <input type="password" required className={inputClass} value={form.confirm} onChange={set('confirm')} placeholder="••••••••" autoComplete="new-password" />
+          {form.confirm && !confirmOk && <span className="block text-[11px] text-rose-500 mt-1">비밀번호가 서로 달라요.</span>}
+        </Field>
+        {error && <p className="text-xs text-rose-500 whitespace-pre-line">{error}</p>}
+        <Button type="submit" className="w-full" loading={loading}>가입하기</Button>
+      </form>
+    </AuthCard>
   );
 }

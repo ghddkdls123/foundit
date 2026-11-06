@@ -1,370 +1,295 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
-import TopBar from '../components/TopBar';
-import BottomNav from '../components/BottomNavBar';
-import { ArrowLeft, Camera, MapPin, X } from 'lucide-react';
-import L from 'leaflet';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Camera, LocateFixed, MapPin, Search, X } from 'lucide-react';
+import Layout from '../components/Layout';
+import KakaoMap from '../components/KakaoMap';
+import { Button, Field, Segmented, inputClass } from '../components/ui';
+import { api, uploadItemImage } from '../lib/api';
+import { CATEGORIES, SCHOOL } from '../lib/constants';
+import { coordToAddress, searchPlaces } from '../lib/kakao';
+import { shrinkImage } from '../lib/format';
 
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-});
-
-function LocationSelector({ position, setPosition, setFormData }) {
-  useMapEvents({
-    click(e) {
-      const { lat, lng } = e.latlng;
-      setPosition([lat, lng]);
-      setFormData(prev => ({
-        ...prev,
-        locationLat: lat,
-        locationLng: lng
-      }));
-    },
-  });
-
-  return position === null ? null : (
-    <Marker position={position}></Marker>
-  );
-}
+const MAX_PHOTOS = 5;
 
 export default function WritePage() {
   const navigate = useNavigate();
-  const isCheckedRef = useRef(false);
+  const [params] = useSearchParams();
+  const mapRef = useRef(null);
+  const fileRef = useRef(null);
 
-  const [postType, setPostType] = useState('found');
-  const [formData, setFormData] = useState({
-    title: '',
-    category: '전자기기',
-    location: '',
-    content: '',
-    locationLat: 36.799,
-    locationLng: 127.114
-  });
-  
-  const [position, setPosition] = useState([36.799, 127.114]);
-  const [imageFile, setImageFile] = useState(null);
-  const [imagePreview, setImagePreview] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const fileInputRef = useRef(null);
+  const [type, setType] = useState(params.get('type') === 'LOST' ? 'LOST' : 'FOUND');
+  const [title, setTitle] = useState('');
+  const [category, setCategory] = useState('');
+  const [place, setPlace] = useState(''); // FOUND: 보관 장소, LOST: 잃어버린 장소
+  const [content, setContent] = useState('');
+  const [pos, setPos] = useState({ lat: SCHOOL.lat, lng: SCHOOL.lng });
+  const [address, setAddress] = useState('');
+  const [photos, setPhotos] = useState([]); // { file, url }
+  const [query, setQuery] = useState('');
+  const [places, setPlaces] = useState([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [progress, setProgress] = useState('');
 
-  const getAuthToken = () => {
-    return (
-      localStorage.getItem('accessToken') ||
-      localStorage.getItem('token') ||
-      localStorage.getItem('jwt') ||
-      localStorage.getItem('access_token') ||
-      ''
+  const isFound = type === 'FOUND';
+
+  // 핀 위치의 주소 표시
+  useEffect(() => {
+    let alive = true;
+    coordToAddress(pos.lat, pos.lng).then((a) => alive && setAddress(a?.full ?? ''));
+    return () => {
+      alive = false;
+    };
+  }, [pos]);
+
+  // 화면을 나갈 때 미리보기 주소 정리
+  const photosRef = useRef(photos);
+  photosRef.current = photos;
+  useEffect(() => () => photosRef.current.forEach((p) => URL.revokeObjectURL(p.url)), []);
+
+  const addPhotos = (e) => {
+    const files = Array.from(e.target.files ?? []).filter((f) => f.type.startsWith('image/'));
+    e.target.value = '';
+    setPhotos((prev) => [...prev, ...files.map((file) => ({ file, url: URL.createObjectURL(file) }))].slice(0, MAX_PHOTOS));
+  };
+
+  const removePhoto = (i) => {
+    setPhotos((prev) => {
+      URL.revokeObjectURL(prev[i].url);
+      return prev.filter((_, idx) => idx !== i);
+    });
+  };
+
+  const useMyLocation = () => {
+    if (!navigator.geolocation) return alert('이 브라우저는 위치 기능을 지원하지 않아요.');
+    navigator.geolocation.getCurrentPosition(
+      (p) => {
+        const next = { lat: p.coords.latitude, lng: p.coords.longitude };
+        setPos(next);
+        mapRef.current?.panTo(next, 3);
+      },
+      () => alert('위치를 가져올 수 없어요. 브라우저의 위치 권한을 확인해주세요.'),
+      { enableHighAccuracy: true, timeout: 10000 },
     );
   };
 
-  useEffect(() => {
-    if (isCheckedRef.current) return;
-    isCheckedRef.current = true;
-
-    const token = getAuthToken();
-    if (!token) {
-      alert('로그인이 필요한 서비스입니다.');
-      navigate('/login', { replace: true });
-    }
-  }, [navigate]);
-
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-  };
-
-  const handleImageChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setImageFile(file);
-      setImagePreview(URL.createObjectURL(file));
-    }
-  };
-
-  const handleRemoveImage = () => {
-    setImageFile(null);
-    setImagePreview(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-
-    const token = getAuthToken();
-    if (!token) {
-      alert('로그인 정보가 만료되었습니다. 다시 로그인해주세요.');
-      navigate('/login');
-      return;
-    }
-
+  const onPlaceSearch = async () => {
+    const q = query.trim();
+    if (!q) return;
     try {
-      // 💡 location 필드 대신 스웨거 명세에 맞춰 storageLocation으로 전달
-      const payload = {
-        title: formData.title,
-        type: postType === 'found' ? 'FOUND' : 'LOST',
-        category: formData.category,
-        locationLat: formData.locationLat,
-        locationLng: formData.locationLng,
-        storageLocation: formData.location,
-        content: formData.content
+      const found = await searchPlaces(q, pos);
+      setPlaces(found);
+      if (found.length === 0) alert('검색 결과가 없어요.');
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const pickPlace = (p) => {
+    setPlaces([]);
+    setQuery('');
+    setPos({ lat: p.lat, lng: p.lng });
+    mapRef.current?.panTo(p, 3);
+  };
+
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    if (!title.trim()) return alert('제목을 입력해주세요.');
+    if (!category) return alert('분류를 골라주세요.');
+    if (isFound && !place.trim()) return alert('물건을 맡긴 곳(보관 장소)을 적어주세요.');
+
+    setSubmitting(true);
+    setProgress('게시글 등록 중...');
+    try {
+      const body = {
+        title: title.trim(),
+        type,
+        category,
+        locationLat: pos.lat,
+        locationLng: pos.lng,
+        content: content.trim() || undefined,
+        ...(isFound ? { storageLocation: place.trim() } : { lostLocation: place.trim() || undefined }),
       };
+      const created = await api('/items', { method: 'POST', body });
 
-      console.log('🔥 [작성요청 Payload]:', payload);
-
-      const itemResponse = await fetch('/api/items', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(payload)
-      });
-
-      const itemResponseText = await itemResponse.text();
-      let itemData = {};
-      try {
-        itemData = itemResponseText ? JSON.parse(itemResponseText) : {};
-      } catch (e) {}
-
-      if (!itemResponse.ok) {
-        throw new Error(itemData.message || '게시글 등록에 실패했습니다.');
-      }
-
-      const itemId = itemData.id || itemData.itemId || itemData.data?.id;
-
-      if (imageFile && itemId) {
-        const urlResponse = await fetch(`/api/items/${itemId}/images/upload-url`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            filename: imageFile.name,
-            contentType: imageFile.type
-          })
-        });
-
-        const urlResponseText = await urlResponse.text();
-        let urlData = {};
+      let failed = 0;
+      for (let i = 0; i < photos.length; i++) {
+        setProgress(`사진 올리는 중 (${i + 1}/${photos.length})`);
         try {
-          urlData = urlResponseText ? JSON.parse(urlResponseText) : {};
-        } catch (e) {}
-
-        if (!urlResponse.ok) {
-          throw new Error(urlData.message || '사진 업로드 URL 발급에 실패했습니다.');
-        }
-
-        const { uploadUrl, key } = urlData;
-
-        if (uploadUrl && key) {
-          const s3Response = await fetch(uploadUrl, {
-            method: 'PUT',
-            headers: { 'Content-Type': imageFile.type },
-            body: imageFile
-          });
-
-          if (!s3Response.ok) {
-            throw new Error('S3 이미지 업로드에 실패했습니다.');
-          }
-
-          const imageRegisterResponse = await fetch(`/api/items/${itemId}/images`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({ key })
-          });
-
-          if (!imageRegisterResponse.ok) {
-            throw new Error('이미지 정보 등록에 실패했습니다.');
-          }
+          const file = await shrinkImage(photos[i].file, 1600, 3 * 1024 * 1024);
+          await uploadItemImage(created.id, file);
+        } catch {
+          failed++;
         }
       }
+      if (failed) alert(`게시글은 등록됐지만 사진 ${failed}장을 올리지 못했어요.`);
 
-      alert('게시글과 사진이 성공적으로 등록되었습니다!');
-      navigate('/feed');
-    } catch (error) {
-      console.error('등록 에러:', error);
-      alert(error.message || '서버 통신 중 오류가 발생했습니다.');
+      if (isFound) navigate(`/feed/${created.id}`, { replace: true });
+      else navigate(`/items/${created.id}/matches`, { replace: true, state: { justCreated: true } });
+    } catch (err) {
+      alert(err.message);
     } finally {
-      setLoading(false);
+      setSubmitting(false);
+      setProgress('');
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col antialiased">
-      <TopBar />
-      <main className="flex-grow pt-20 px-6 pb-28 max-w-xl mx-auto w-full">
-        <div className="flex items-center justify-between mb-6">
-          <button 
-            type="button"
-            onClick={() => navigate(-1)}
-            className="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-800 transition"
+    <Layout title="게시글 등록">
+      <form onSubmit={onSubmit} className="space-y-5 pt-1">
+        <Segmented
+          value={type}
+          onChange={setType}
+          options={[
+            { value: 'FOUND', label: '물건을 주웠어요', activeClass: 'text-indigo-600' },
+            { value: 'LOST', label: '물건을 잃어버렸어요', activeClass: 'text-amber-600' },
+          ]}
+        />
+
+        {/* 사진 */}
+        <section>
+          <p className="text-xs font-bold text-slate-700 mb-1.5">
+            사진 <span className="font-normal text-slate-400">({photos.length}/{MAX_PHOTOS})</span>
+          </p>
+          <div className="flex gap-2 overflow-x-auto no-scrollbar">
+            {photos.length < MAX_PHOTOS && (
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                className="shrink-0 w-20 h-20 rounded-xl border-2 border-dashed border-slate-300 bg-white flex flex-col items-center justify-center text-slate-400 hover:border-indigo-400 hover:text-indigo-500"
+              >
+                <Camera className="w-6 h-6" />
+                <span className="text-[10px] font-semibold mt-0.5">추가</span>
+              </button>
+            )}
+            {photos.map((p, i) => (
+              <div key={p.url} className="relative shrink-0 w-20 h-20 rounded-xl overflow-hidden border border-slate-200">
+                <img src={p.url} alt="" className="w-full h-full object-cover" />
+                <button type="button" onClick={() => removePhoto(i)} className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-0.5" aria-label="사진 빼기">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+                {i === 0 && <span className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[10px] text-center py-0.5">대표</span>}
+              </div>
+            ))}
+          </div>
+          <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={addPhotos} />
+          <p className="text-[11px] text-slate-400 mt-1.5">
+            {isFound ? '사진이 있으면 주인이 사진 검색으로 찾을 수 있어요.' : '사진을 올리면 비슷하게 생긴 습득물을 찾아드려요.'}
+          </p>
+        </section>
+
+        <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-4">
+          <Field label="제목">
+            <input
+              className={inputClass}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              maxLength={100}
+              placeholder={isFound ? '예: 검정 반지갑 주웠어요' : '예: 에어팟 프로 케이스 찾아요'}
+            />
+          </Field>
+
+          <Field label="분류">
+            <div className="flex flex-wrap gap-1.5">
+              {CATEGORIES.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setCategory(c)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
+                    category === c ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-50 text-slate-600 border-slate-200'
+                  }`}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+          </Field>
+
+          <Field
+            label={isFound ? '보관 장소 (물건을 맡긴 곳)' : '잃어버린 장소 (선택)'}
+            hint={isFound ? '로그인한 사용자에게만 보여요. 직접 갖고 있다면 "제가 보관 중"이라고 적어주세요.' : '기억나는 만큼만 적어주세요.'}
           >
-            <ArrowLeft className="w-4 h-4" />
-            <span>돌아가기</span>
-          </button>
-          <h1 className="text-base font-bold text-slate-800">새 글 작성하기</h1>
-          <div className="w-12"></div>
+            <input
+              className={inputClass}
+              value={place}
+              onChange={(e) => setPlace(e.target.value)}
+              maxLength={200}
+              placeholder={isFound ? '예: 학생회관 1층 분실물센터' : '예: 중앙도서관 2층 열람실 근처'}
+            />
+          </Field>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="grid grid-cols-2 gap-3 p-1.5 bg-slate-200/70 rounded-2xl">
-            <button
-              type="button"
-              onClick={() => setPostType('found')}
-              className={`py-3 rounded-xl text-xs font-bold transition shadow-sm ${
-                postType === 'found' ? 'bg-indigo-600 text-white' : 'bg-transparent text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              🏷️ 습득물 신고
-            </button>
-            <button
-              type="button"
-              onClick={() => setPostType('lost')}
-              className={`py-3 rounded-xl text-xs font-bold transition shadow-sm ${
-                postType === 'lost' ? 'bg-amber-600 text-white' : 'bg-transparent text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              🔍 분실물 찾기 (요청)
-            </button>
-          </div>
+        {/* 지도 */}
+        <section className="bg-white rounded-2xl border border-slate-200 p-4">
+          <p className="text-xs font-bold text-slate-700">{isFound ? '주운 위치' : '잃어버린 지역'}</p>
+          <p className="text-[11px] text-slate-400 mt-0.5">
+            {isFound ? '물건을 주운 곳을 지도에서 눌러주세요.' : '잃어버린 것 같은 곳을 지도에서 눌러주세요. 이 지역의 습득물을 추천해드려요.'}
+          </p>
 
-          <div className="bg-white p-6 rounded-3xl border border-slate-200 text-center space-y-2 shadow-sm relative">
-            <input 
-              type="file" 
-              accept="image/*"
-              ref={fileInputRef}
-              onChange={handleImageChange}
-              className="hidden" 
-              id="image-upload"
-            />
-            
-            {imagePreview ? (
-              <div className="relative w-full h-48 rounded-2xl overflow-hidden border border-slate-200">
-                <img src={imagePreview} alt="미리보기" className="w-full h-full object-cover" />
-                <button
-                  type="button"
-                  onClick={handleRemoveImage}
-                  className="absolute top-2 right-2 bg-slate-900/60 hover:bg-slate-900 text-white p-1.5 rounded-full transition"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            ) : (
-              <label htmlFor="image-upload" className="cursor-pointer block space-y-2 py-2">
-                <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto text-slate-400 hover:bg-slate-200 transition">
-                  <Camera className="w-7 h-7" />
-                </div>
-                <p className="text-xs font-medium text-slate-600">물품 사진을 업로드해주세요</p>
-                <p className="text-[10px] text-slate-400">선택사항이지만 등록하면 주인을 찾을 확률이 높아져요!</p>
-              </label>
-            )}
-          </div>
-
-          <div className="bg-white p-6 rounded-3xl border border-slate-200 space-y-4 shadow-sm">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">제목</label>
-              <input 
-                type="text" 
-                name="title"
-                value={formData.title}
-                onChange={handleChange}
-                placeholder={postType === 'found' ? '예: [중앙도서관] 에어팟 프로 습득했습니다' : '예: 중앙도서관에서 지갑을 잃어버렸습니다ㅠㅠ'}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-800 focus:outline-none focus:border-indigo-600 transition"
-                required
+          <div className="flex gap-2 mt-3">
+            <div className="relative flex-1">
+              <input
+                className={`${inputClass} py-2.5 pr-9`}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    onPlaceSearch();
+                  }
+                }}
+                placeholder="장소 검색"
               />
+              <button type="button" onClick={onPlaceSearch} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400" aria-label="검색">
+                <Search className="w-4 h-4" />
+              </button>
+              {places.length > 0 && (
+                <ul className="absolute z-20 top-full mt-1 inset-x-0 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden">
+                  {places.map((p) => (
+                    <li key={`${p.name}-${p.lat}`}>
+                      <button type="button" onClick={() => pickPlace(p)} className="w-full text-left px-3 py-2 hover:bg-slate-50">
+                        <p className="text-xs font-semibold text-slate-800">{p.name}</p>
+                        <p className="text-[10px] text-slate-400 truncate">{p.address}</p>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">카테고리</label>
-                <select 
-                  name="category"
-                  value={formData.category}
-                  onChange={handleChange}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 text-xs text-slate-800 focus:outline-none focus:border-indigo-600 transition"
-                >
-                  <option value="전자기기">전자기기</option>
-                  <option value="지갑/카드">지갑/카드</option>
-                  <option value="귀중품">귀중품</option>
-                  <option value="가방">가방</option>
-                  <option value="의류">의류</option>
-                  <option value="우산">우산</option>
-                  <option value="기타">기타</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  {postType === 'found' ? '습득 장소' : '분실 장소'}
-                </label>
-                <input 
-                  type="text" 
-                  name="location"
-                  value={formData.location}
-                  onChange={handleChange}
-                  placeholder={postType === 'found' ? '예: 중앙도서관 3층 보관' : '예: 중앙도서관 1층 로비'}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-800 focus:outline-none focus:border-indigo-600 transition"
-                  required
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">지도에서 위치 지정</label>
-              <div className="w-full h-48 rounded-2xl overflow-hidden border border-slate-200 isolate">
-                <MapContainer 
-                  center={position} 
-                  zoom={16} 
-                  style={{ width: '100%', height: '100%' }}
-                >
-                  <TileLayer
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                  />
-                  <LocationSelector 
-                    position={position} 
-                    setPosition={setPosition} 
-                    setFormData={setFormData} 
-                  />
-                </MapContainer>
-              </div>
-              <p className="text-[10px] text-slate-400 mt-1">지도를 클릭하면 해당 위치의 위도/경도가 백엔드 전송용으로 자동 지정됩니다.</p>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">상세 내용</label>
-              <textarea 
-                name="content"
-                value={formData.content}
-                onChange={handleChange}
-                rows="4"
-                placeholder="물품의 특징, 상태 등 상세한 내용을 적어주세요."
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-slate-800 focus:outline-none focus:border-indigo-600 transition resize-none"
-                required
-              ></textarea>
-            </div>
+            <button type="button" onClick={useMyLocation} className="shrink-0 px-3 rounded-xl border border-slate-200 text-sky-600 bg-white" title="현재 위치">
+              <LocateFixed className="w-4 h-4" />
+            </button>
           </div>
 
-          <button 
-            type="submit"
-            disabled={loading}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-2xl transition text-sm shadow-md shadow-indigo-600/20 disabled:opacity-50"
-          >
-            {loading ? '등록 중...' : '게시글 등록하기'}
-          </button>
-        </form>
-      </main>
-      <BottomNav />
-    </div>
+          <KakaoMap
+            ref={mapRef}
+            className="h-56 rounded-xl overflow-hidden border border-slate-200 mt-2"
+            center={SCHOOL}
+            level={3}
+            pick={pos}
+            onPick={setPos}
+          />
+          <p className="text-[11px] text-slate-500 mt-2 flex items-center gap-1">
+            <MapPin className="w-3 h-3 text-rose-500 shrink-0" />
+            {address || '지도를 눌러 위치를 정해주세요'}
+          </p>
+        </section>
+
+        <Field label="상세 설명 (선택)">
+          <textarea
+            rows={4}
+            className={`${inputClass} resize-none bg-white`}
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            maxLength={2000}
+            placeholder={isFound ? '색깔, 브랜드, 특징 등을 적어주세요. 신분증 번호 같은 개인정보는 적지 마세요.' : '색깔, 브랜드, 안에 든 물건, 잃어버린 시간 등을 적어주세요.'}
+          />
+        </Field>
+
+        <Button type="submit" variant={isFound ? 'primary' : 'amber'} className="w-full py-4" loading={submitting}>
+          {submitting ? progress : isFound ? '습득물 등록하기' : '분실물 등록하고 비슷한 습득물 찾기'}
+        </Button>
+      </form>
+    </Layout>
   );
 }

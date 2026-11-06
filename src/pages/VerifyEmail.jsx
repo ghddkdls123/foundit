@@ -1,98 +1,65 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { useSearchParams, useNavigate, Link } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { CheckCircle2, Loader2, XCircle } from 'lucide-react';
+import AuthCard from '../components/AuthCard';
+import { Button } from '../components/ui';
+import { api, getSession, saveSession } from '../lib/api';
 
 export default function VerifyEmail() {
-  const [searchParams] = useSearchParams();
-  const token = searchParams.get('token');
+  const [params] = useSearchParams();
+  const token = params.get('token');
   const navigate = useNavigate();
-
-  const [status, setStatus] = useState('verifying'); // 'verifying' | 'success' | 'error'
-  const [errorMessage, setErrorMessage] = useState('');
-  
-  const isCalledRef = useRef(false);
+  const [status, setStatus] = useState(token ? 'verifying' : 'error');
+  const [message, setMessage] = useState(token ? '' : '인증 링크가 올바르지 않아요.');
+  const called = useRef(false);
 
   useEffect(() => {
-    if (!token) {
-      setStatus('error');
-      setErrorMessage('인증 토큰이 존재하지 않습니다.');
-      return;
-    }
-
-    if (isCalledRef.current) return;
-    isCalledRef.current = true;
-
-    const verifyEmail = async () => {
-      try {
-        const response = await fetch('https://d2561q9uqrldal.cloudfront.net/api/auth/email/verify', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ token }),
-        });
-
-        const data = await response.json().catch(() => ({}));
-
-        // 200~299 (성공)
-        if (response.ok) {
-          setStatus('success');
-        } else {
-          setStatus('error');
-          setErrorMessage(data.message || '유효하지 않거나 만료된 인증 링크입니다.');
-        }
-      } catch (error) {
-        console.error('이메일 인증 통신 에러:', error);
+    if (!token || called.current) return; // StrictMode 에서 두 번 호출되는 것 방지 (토큰은 1회용)
+    called.current = true;
+    api('/auth/email/verify', { method: 'POST', auth: false, body: { token } })
+      .then(() => {
+        setStatus('success');
+        if (getSession()) saveSession({ emailVerified: true });
+      })
+      .catch((e) => {
         setStatus('error');
-        setErrorMessage('서버와의 통신에 실패했습니다.');
-      }
-    };
-
-    verifyEmail();
+        setMessage(e.message);
+      });
   }, [token]);
 
+  const loggedIn = !!getSession();
+
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <div className="w-[420px] bg-white rounded-2xl shadow-lg p-8 border border-slate-100 text-center">
+    <AuthCard subtitle="이메일 인증">
+      <div className="text-center py-2">
         {status === 'verifying' && (
-          <div>
-            <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            <h2 className="text-lg font-bold text-slate-800">이메일 인증을 진행 중입니다...</h2>
-            <p className="text-xs text-slate-500 mt-2">잠시만 기다려 주세요.</p>
-          </div>
+          <>
+            <Loader2 className="w-10 h-10 text-indigo-600 animate-spin mx-auto" />
+            <p className="text-sm font-bold text-slate-800 mt-4">인증하는 중이에요...</p>
+          </>
         )}
-
         {status === 'success' && (
-          <div>
-            <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-2xl mx-auto mb-4">
-              ✓
-            </div>
-            <h2 className="text-xl font-bold text-slate-800">이메일 인증 완료!</h2>
-            <p className="text-sm text-slate-500 mt-2 mb-6">성공적으로 인증되었습니다. 로그인 후 사용해 주세요.</p>
-            <button
-              onClick={() => navigate('/login')}
-              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl transition text-sm shadow-sm"
-            >
-              로그인하러 가기
-            </button>
-          </div>
+          <>
+            <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto" />
+            <p className="text-base font-bold text-slate-800 mt-4">이메일 인증 완료!</p>
+            <p className="text-xs text-slate-500 mt-1">{loggedIn ? '이제 모든 기능을 쓸 수 있어요.' : '로그인해서 시작해보세요.'}</p>
+            <Button className="w-full mt-6" onClick={() => navigate(loggedIn ? '/mypage' : '/login', { replace: true })}>
+              {loggedIn ? '내 정보로' : '로그인하러 가기'}
+            </Button>
+          </>
         )}
-
         {status === 'error' && (
-          <div>
-            <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center text-2xl mx-auto mb-4">
-              ✕
-            </div>
-            <h2 className="text-xl font-bold text-slate-800">인증 실패</h2>
-            <p className="text-sm text-rose-500 mt-2 mb-6">{errorMessage}</p>
-            <Link
-              to="/login"
-              className="inline-block w-full bg-slate-800 hover:bg-slate-900 text-white font-semibold py-3 rounded-xl transition text-sm shadow-sm"
-            >
-              로그인 페이지로 이동
-            </Link>
-          </div>
+          <>
+            <XCircle className="w-12 h-12 text-rose-500 mx-auto" />
+            <p className="text-base font-bold text-slate-800 mt-4">인증하지 못했어요</p>
+            <p className="text-xs text-rose-500 mt-1">{message}</p>
+            <p className="text-[11px] text-slate-400 mt-3">링크가 만료됐다면 내 정보 화면에서 인증 메일을 다시 받을 수 있어요.</p>
+            <Button variant="secondary" className="w-full mt-6" onClick={() => navigate(loggedIn ? '/mypage' : '/login', { replace: true })}>
+              {loggedIn ? '내 정보로' : '로그인 화면으로'}
+            </Button>
+          </>
         )}
       </div>
-    </div>
+    </AuthCard>
   );
 }

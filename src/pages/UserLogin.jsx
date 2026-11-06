@@ -1,172 +1,137 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { ShieldCheck } from 'lucide-react';
+import AuthCard from '../components/AuthCard';
+import { Button, Field, inputClass } from '../components/ui';
+import { api, recallName, saveSession } from '../lib/api';
 
 export default function Login() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const from = location.state?.from || '/';
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
+  const [mfaToken, setMfaToken] = useState(''); // 값이 있으면 2단계(MFA 코드 입력) 화면
+  const [emailVerified, setEmailVerified] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  // 이메일 미인증 상태 관리
-  const [unverifiedEmail, setUnverifiedEmail] = useState('');
-  const [cooldown, setCooldown] = useState(0);
-  const [resendLoading, setResendLoading] = useState(false);
+  /** 로그인 완료: 토큰 저장 → 이름 채우기 → 원래 화면으로 */
+  const finish = async (accessToken, verified) => {
+    const normalized = email.trim().toLowerCase();
+    saveSession({
+      accessToken,
+      email: normalized,
+      name: recallName(normalized) || normalized.split('@')[0],
+      emailVerified: verified,
+    });
+    // 로그인 응답에 이름이 없어서, 내 게시글이 있으면 거기 적힌 이름을 씀
+    try {
+      const mine = await api('/items/mine', { query: { limit: 1 } });
+      const name = mine?.items?.[0]?.author?.name;
+      if (name) saveSession({ name });
+    } catch {
+      /* 이름은 없어도 됨 */
+    }
+    navigate(from, { replace: true });
+  };
 
-  // 60초 타이머
-  useEffect(() => {
-    if (cooldown <= 0) return;
-    const timer = setInterval(() => {
-      setCooldown((prev) => prev - 1);
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [cooldown]);
-
-  const handleLogin = async (e) => {
+  const onLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
-
+    setError('');
     try {
-      const response = await fetch('https://d2561q9uqrldal.cloudfront.net/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, password }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        localStorage.setItem('accessToken', data.token || data.accessToken || data.accesstoken);
-        if (email) {
-          localStorage.setItem('userEmail', email);
-        }
-        
-        if (data.name) {
-          localStorage.setItem('userName', data.name);
-        } else {
-          localStorage.setItem('userName', email.split('@')[0]);
-        }
-
-        // 이메일 미인증 상태 체크
-        if (data.emailVerified === false) {
-          setUnverifiedEmail(email);
-        } else {
-          setUnverifiedEmail('');
-        }
-
-        if (email.includes('admin')) {
-          alert('기관 관리자로 로그인되었습니다.');
-          navigate('/admin');
-        } else {
-          alert('로그인 성공!');
-          navigate('/home');
-        }
-      } else {
-        alert(data.message || '로그인에 실패했습니다. 아이디와 비밀번호를 확인해주세요.');
+      const d = await api('/auth/login', { method: 'POST', body: { email, password }, auth: false });
+      setEmailVerified(d.emailVerified !== false);
+      if (d.mfaRequired) {
+        setMfaToken(d.mfaToken);
+        return;
       }
-    } catch (error) {
-      console.error('통신 에러:', error);
-      alert('서버와 연결할 수 없습니다. 네트워크를 확인해주세요.');
+      await finish(d.accessToken, d.emailVerified !== false);
+    } catch (err) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // 재발송 요청
-  const handleResendEmail = async () => {
-    if (cooldown > 0 || !unverifiedEmail) return;
-    setResendLoading(true);
-
+  const onMfa = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
     try {
-      const response = await fetch('https://d2561q9uqrldal.cloudfront.net/api/auth/email/send', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email: unverifiedEmail }),
-      });
-
-      if (response.ok) {
-        alert('인증 메일이 재발송되었습니다. 메일함을 확인해주세요.');
-        setCooldown(60);
+      const d = await api('/auth/mfa/login', { method: 'POST', body: { mfaToken, code }, auth: false });
+      await finish(d.accessToken, emailVerified);
+    } catch (err) {
+      if (err.status === 401 && !/코드/.test(err.message)) {
+        // mfaToken 은 5분만 유효
+        setMfaToken('');
+        setCode('');
+        setError('인증 시간이 지났어요. 다시 로그인해주세요.');
       } else {
-        alert('인증 메일 재발송에 실패했습니다.');
+        setError(err.status === 401 ? '인증 코드가 올바르지 않아요.' : err.message);
       }
-    } catch (error) {
-      console.error('재발송 에러:', error);
-      alert('서버 통신 에러가 발생했습니다.');
     } finally {
-      setResendLoading(false);
+      setLoading(false);
     }
   };
 
-  return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <div className="w-[420px] bg-white rounded-2xl shadow-lg p-8 border border-slate-100 flex flex-col justify-between">
-        <div>
-          <div className="text-center mb-6">
-            <span className="bg-indigo-50 text-indigo-600 text-xs font-semibold px-3 py-1 rounded-full uppercase tracking-wider">
-              AI 분실물 찾기 플랫폼
+  if (mfaToken) {
+    return (
+      <AuthCard subtitle="2단계 인증">
+        <form onSubmit={onMfa} className="space-y-4">
+          <div className="flex flex-col items-center text-center">
+            <span className="w-12 h-12 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center">
+              <ShieldCheck className="w-6 h-6" />
             </span>
-            <h1 className="text-2xl font-bold text-slate-800 mt-3">foundit</h1>
-            <p className="text-sm text-slate-500 mt-1">분실물 찾기와 습득신고는 foundit에서</p>
+            <p className="text-sm font-bold text-slate-800 mt-3">인증 앱의 6자리 코드를 입력하세요</p>
+            <p className="text-xs text-slate-400 mt-1">Google Authenticator 등에 표시된 코드예요.</p>
           </div>
+          <input
+            className={`${inputClass} text-center text-2xl tracking-[0.5em] font-bold`}
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            autoFocus
+            maxLength={6}
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+            placeholder="000000"
+          />
+          {error && <p className="text-xs text-rose-500 text-center">{error}</p>}
+          <Button type="submit" className="w-full" loading={loading} disabled={code.length !== 6}>확인</Button>
+          <button type="button" onClick={() => { setMfaToken(''); setCode(''); setError(''); }} className="w-full text-xs text-slate-400">
+            처음으로
+          </button>
+        </form>
+      </AuthCard>
+    );
+  }
 
-          {/* 이메일 미인증 안내 박스 */}
-          {unverifiedEmail && (
-            <div className="mb-4 p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-left">
-              <p className="text-xs text-amber-800 font-medium leading-relaxed">
-                ⚠️ 이메일 인증이 아직 완료되지 않았습니다. 관리자 승인 후 이용 가능합니다.
-              </p>
-            </div>
-          )}
-
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1 text-left ml-2">이메일</label>
-              <input
-                type="email"
-                required
-                placeholder="example@email.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1 text-left ml-2">비밀번호</label>
-              <input
-                type="password"
-                required
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 rounded-xl transition shadow-sm text-sm disabled:opacity-50"
-            >
-              {loading ? '로그인 중...' : '로그인'}
-            </button>
-          </form>
-        </div>
-
-        <div className="mt-6 pt-6 border-t border-slate-100 text-center">
-          <span className="text-xs text-slate-400">
-            아직 계정이 없으신가요?
-          </span>
-          <Link
-            to="/signup"
-            className="text-xs font-semibold text-indigo-600 hover:underline ml-2"
-          >
-            회원가입하기
-          </Link>
-        </div>
-      </div>
-    </div>
+  return (
+    <AuthCard
+      subtitle="분실물 찾기와 습득 신고는 foundit에서"
+      footer={
+        <>
+          아직 계정이 없으신가요?
+          <Link to="/signup" className="font-semibold text-indigo-600 ml-1.5">회원가입</Link>
+        </>
+      }
+    >
+      {location.state?.reason && (
+        <p className="mb-4 text-xs text-indigo-700 bg-indigo-50 rounded-xl px-3 py-2.5">{location.state.reason}</p>
+      )}
+      <form onSubmit={onLogin} className="space-y-4">
+        <Field label="이메일">
+          <input type="email" required autoComplete="email" className={inputClass} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="example@email.com" />
+        </Field>
+        <Field label="비밀번호">
+          <input type="password" required autoComplete="current-password" className={inputClass} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
+        </Field>
+        {error && <p className="text-xs text-rose-500 whitespace-pre-line">{error}</p>}
+        <Button type="submit" className="w-full" loading={loading}>로그인</Button>
+      </form>
+    </AuthCard>
   );
 }
