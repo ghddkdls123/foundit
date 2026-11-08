@@ -1,5 +1,29 @@
 // index.html 에서 카카오맵 SDK를 autoload=false 로 불러오고, 여기서 준비될 때까지 기다립니다.
+import { SCHOOL, SCHOOL_ADDRESS } from './constants';
+
 let loading = null;
+
+/** 학교 주소 → 좌표 (지도를 처음 쓰기 전에 한 번). 찾으면 SCHOOL 값을 바꾸고 브라우저에 저장 */
+function resolveSchool(kakao) {
+  return new Promise((resolve) => {
+    if (!kakao.maps.services) return resolve();
+    const done = setTimeout(resolve, 1500); // 늦어지면 임시 값으로 진행
+    new kakao.maps.services.Geocoder().addressSearch(SCHOOL_ADDRESS, (result, status) => {
+      clearTimeout(done);
+      if (status === kakao.maps.services.Status.OK && result[0]) {
+        const lat = Number(result[0].y);
+        const lng = Number(result[0].x);
+        Object.assign(SCHOOL, { lat, lng });
+        try {
+          localStorage.setItem('schoolCoord', JSON.stringify({ address: SCHOOL_ADDRESS, lat, lng }));
+        } catch {
+          /* 저장 못 해도 이번엔 사용 */
+        }
+      }
+      resolve();
+    });
+  });
+}
 
 export function loadKakao() {
   if (loading) return loading;
@@ -7,7 +31,7 @@ export function loadKakao() {
     let tries = 0;
     const check = () => {
       if (window.kakao && window.kakao.maps) {
-        window.kakao.maps.load(() => resolve(window.kakao));
+        window.kakao.maps.load(() => resolveSchool(window.kakao).then(() => resolve(window.kakao)));
         return;
       }
       if (++tries > 50) {
@@ -51,7 +75,7 @@ export async function searchPlaces(keyword, near) {
       keyword,
       (data, status) => {
         if (status !== kakao.maps.services.Status.OK) return resolve([]);
-        resolve(data.slice(0, 5).map((p) => ({ name: p.place_name, address: p.road_address_name || p.address_name, lat: Number(p.y), lng: Number(p.x) })));
+        resolve(data.slice(0, 8).map((p) => ({ name: p.place_name, address: p.road_address_name || p.address_name, lat: Number(p.y), lng: Number(p.x) })));
       },
       opts,
     );
@@ -63,7 +87,7 @@ function pinSvg(color) {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
-export const PIN_COLORS = { FOUND: '#4f46e5', LOST: '#f59e0b', ME: '#0ea5e9', PICK: '#e11d48' };
+export const PIN_COLORS = { FOUND: '#2563eb', LOST: '#f59e0b', ME: '#0ea5e9', PICK: '#e11d48' };
 
 export function markerImage(kakao, kind) {
   return new kakao.maps.MarkerImage(pinSvg(PIN_COLORS[kind] || PIN_COLORS.PICK), new kakao.maps.Size(34, 44), {

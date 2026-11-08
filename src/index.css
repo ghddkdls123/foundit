@@ -30,3 +30,24 @@ body {
 .pb-safe {
   padding-bottom: env(safe-area-inset-bottom);
 }
+
+/* 한글이 단어 중간에서 줄바꿈되지 않게 (예: "찾아보 / 세요" 방지) */
+body {
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+/* 아이폰 사파리는 입력칸 글자가 16px보다 작으면 누를 때 화면을 확대해서 어긋남 → 휴대폰에서는 16px */
+@media (max-width: 767px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* 가로 스크롤 방지 (clip 은 sticky 위치 고정을 깨지 않음) */
+html,
+body {
+  overflow-x: clip;
+}

@@ -14,6 +14,7 @@ import VerifyEmail from './pages/VerifyEmail';
 import MfaSetup from './pages/MfaSetup';
 import VerifyInstitution from './pages/VerifyInstitution';
 import MyPage from './pages/MyPage';
+import Toaster from './components/Toaster';
 
 /** 로그인이 필요한 화면: 로그인 후 원래 화면으로 돌아옵니다 */
 function RequireAuth({ children }) {
@@ -53,6 +54,7 @@ export default function App() {
         <Route path="/signup/general" element={<Navigate to="/signup" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      <Toaster />
     </BrowserRouter>
   );
 }

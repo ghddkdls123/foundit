@@ -4,6 +4,7 @@ import { CheckCircle2, Copy, ShieldCheck } from 'lucide-react';
 import Layout from '../components/Layout';
 import { Button, ErrorBox, Spinner, inputClass } from '../components/ui';
 import { api, saveSession } from '../lib/api';
+import { toast } from '../lib/toast';
 
 export default function MfaSetup() {
   const navigate = useNavigate();
@@ -47,6 +48,7 @@ export default function MfaSetup() {
       const d = await api('/auth/mfa/enable', { method: 'POST', body: { code } });
       saveSession({ accessToken: d.accessToken }); // MFA 인증된 새 토큰
       setStatus('done');
+      toast.success('2단계 인증이 등록되었습니다');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -55,7 +57,7 @@ export default function MfaSetup() {
   };
 
   return (
-    <Layout title="2단계 인증(MFA) 등록" nav={false}>
+    <Layout title="2단계 인증(MFA) 등록" back width="narrow">
       {status === 'loading' && <Spinner />}
       {status === 'error' && <ErrorBox message={error} />}
 
@@ -78,19 +80,19 @@ export default function MfaSetup() {
       )}
 
       {status === 'ready' && setup && (
-        <div className="space-y-5 pt-1">
-          <ol className="text-xs text-slate-600 space-y-1.5 bg-white rounded-2xl border border-slate-200 p-4 list-decimal list-inside leading-relaxed">
+        <div className="space-y-5">
+          <ol className="text-xs text-slate-600 space-y-1.5 bg-slate-50 rounded-lg border border-slate-200 p-4 list-decimal list-inside leading-relaxed">
             <li>휴대폰에 Google Authenticator 같은 인증 앱을 설치하세요.</li>
             <li>앱에서 아래 QR 코드를 스캔하세요.</li>
             <li>앱에 나온 6자리 코드를 입력하면 완료돼요.</li>
           </ol>
 
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 flex flex-col items-center">
+          <div className="bg-white rounded-lg border border-slate-200 p-5 flex flex-col items-center">
             <img src={setup.qrDataUrl} alt="MFA 등록용 QR 코드" className="w-48 h-48" />
             {secret && (
               <button
                 type="button"
-                onClick={() => navigator.clipboard?.writeText(secret).then(() => alert('키를 복사했어요.'))}
+                onClick={() => navigator.clipboard?.writeText(secret).then(() => toast.success('키를 복사했어요'))}
                 className="mt-3 text-[11px] text-slate-500 flex items-center gap-1 font-mono break-all text-center"
               >
                 <Copy className="w-3 h-3 shrink-0" /> {secret}

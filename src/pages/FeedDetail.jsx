@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Building2, CheckCircle2, Edit3, ImageOff, Lock, MapPin, MoreVertical, RotateCcw, Sparkles, Trash2, User } from 'lucide-react';
+import { Building2, CheckCircle2, Edit3, ImageOff, Lock, MapPin, MoreVertical, RotateCcw, Trash2 } from 'lucide-react';
 import Layout from '../components/Layout';
 import KakaoMap from '../components/KakaoMap';
 import ItemCard from '../components/ItemCard';
+import { NoSimilarNotice, SimilarityHelp } from '../components/SimilarityHelp';
 import { Button, ErrorBox, Field, Spinner, inputClass } from '../components/ui';
 import { api } from '../lib/api';
-import { CATEGORIES, STATUS_LABEL } from '../lib/constants';
+import { CATEGORIES, MIN_SIMILARITY, STATUS_LABEL } from '../lib/constants';
 import { fullDate } from '../lib/format';
 import useSession from '../lib/useSession';
+import { toast } from '../lib/toast';
 
 export default function FeedDetail() {
   const { id } = useParams();
@@ -33,11 +35,22 @@ export default function FeedDetail() {
       .then((data) => alive && setItem(data))
       .catch((e) => alive && setError(e.status === 404 ? '게시글을 찾을 수 없어요. 삭제되었을 수 있어요.' : e.message))
       .finally(() => alive && setLoading(false));
-    api(`/items/${id}/similar`, { query: { limit: 6 } })
-      .then((data) => alive && setSimilar({ ready: data?.ready !== false, items: data?.items ?? [] }))
-      .catch(() => {});
+    // 사진 분석(임베딩)이 아직이면 4초마다 다시 확인 (최대 약 40초)
+    let tries = 0;
+    let timer;
+    const loadSimilar = () =>
+      api(`/items/${id}/similar`, { query: { limit: 10, minSimilarity: MIN_SIMILARITY } })
+        .then((data) => {
+          if (!alive) return;
+          const ready = data?.ready !== false;
+          setSimilar({ ready, items: data?.items ?? [], gaveUp: !ready && tries >= 9 });
+          if (!ready && ++tries < 10) timer = setTimeout(loadSimilar, 4000);
+        })
+        .catch(() => {});
+    loadSimilar();
     return () => {
       alive = false;
+      clearTimeout(timer);
     };
   }, [id, session?.userId]);
 
@@ -47,10 +60,10 @@ export default function FeedDetail() {
     return () => document.removeEventListener('mousedown', close);
   }, []);
 
-  if (loading) return <Layout title="게시글"><Spinner /></Layout>;
+  if (loading) return <Layout back width="medium"><Spinner /></Layout>;
   if (error || !item) {
     return (
-      <Layout title="게시글">
+      <Layout back width="medium">
         <ErrorBox message={error || '게시글을 불러오지 못했어요.'} />
         <Button variant="secondary" className="w-full mt-3" onClick={() => navigate('/feed')}>목록으로</Button>
       </Layout>
@@ -72,7 +85,7 @@ export default function FeedDetail() {
   };
 
   const saveEdit = async () => {
-    if (!form.title.trim()) return alert('제목을 입력해주세요.');
+    if (!form.title.trim()) return toast.error('제목을 입력해주세요.');
     setSaving(true);
     try {
       const body = {
@@ -84,8 +97,9 @@ export default function FeedDetail() {
       const updated = await api(`/items/${id}`, { method: 'PATCH', body });
       setItem((prev) => ({ ...prev, ...updated }));
       setEditing(false);
+      toast.success('수정되었습니다');
     } catch (e) {
-      alert(e.message);
+      toast.error(e.message);
     } finally {
       setSaving(false);
     }
@@ -99,8 +113,9 @@ export default function FeedDetail() {
     try {
       await api(`/items/${id}/status`, { method: 'PATCH', body: { status: next } });
       setItem((prev) => ({ ...prev, status: next }));
+      toast.success(next === 'RETURNED' ? '반환 완료로 바꿨어요' : '진행 중으로 바꿨어요');
     } catch (e) {
-      alert(e.message);
+      toast.error(e.message);
     }
   };
 
@@ -109,21 +124,22 @@ export default function FeedDetail() {
     if (!window.confirm('이 게시글을 삭제할까요? 사진도 함께 지워집니다.')) return;
     try {
       await api(`/items/${id}`, { method: 'DELETE' });
+      toast.success('삭제되었습니다');
       navigate('/feed', { replace: true });
     } catch (e) {
-      alert(e.message);
+      toast.error(e.message);
     }
   };
 
   const menu = item.isMine && !editing && (
     <div className="relative" ref={menuRef}>
-      <button type="button" onClick={() => setMenuOpen((v) => !v)} className="p-2 -mr-2 rounded-full text-slate-600 hover:bg-slate-100" aria-label="메뉴">
+      <button type="button" onClick={() => setMenuOpen((v) => !v)} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label="메뉴">
         <MoreVertical className="w-5 h-5" />
       </button>
       {menuOpen && (
-        <div className="absolute right-0 mt-1 w-40 bg-white rounded-xl shadow-xl border border-slate-100 py-1 z-50 text-xs font-semibold">
+        <div className="absolute right-0 mt-1 w-44 bg-white rounded-md shadow-lg border border-slate-100 py-1 z-50 text-xs font-semibold">
           <button type="button" onClick={startEdit} className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-slate-50 text-slate-700">
-            <Edit3 className="w-3.5 h-3.5 text-indigo-600" /> 수정하기
+            <Edit3 className="w-3.5 h-3.5 text-blue-600" /> 수정하기
           </button>
           <button type="button" onClick={toggleStatus} className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-slate-50 text-slate-700">
             {item.status === 'OPEN' ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> : <RotateCcw className="w-3.5 h-3.5 text-slate-500" />}
@@ -140,137 +156,178 @@ export default function FeedDetail() {
   const images = item.imageUrls ?? [];
 
   return (
-    <Layout title={isFound ? '습득물' : '분실물'} right={menu}>
-      <div className="-mx-4">
-        {images.length > 0 ? (
-          <div className="flex overflow-x-auto snap-x snap-mandatory no-scrollbar bg-slate-900">
-            {images.map((src, i) => (
-              <div key={src} className="relative shrink-0 w-full aspect-square snap-center">
-                <img src={src} alt={`${item.title} 사진 ${i + 1}`} className="w-full h-full object-contain" />
-                {images.length > 1 && (
-                  <span className="absolute bottom-3 right-3 bg-black/50 text-white text-[11px] px-2 py-0.5 rounded-full">
-                    {i + 1} / {images.length}
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="w-full aspect-[16/9] bg-slate-100 flex flex-col items-center justify-center gap-1 text-xs text-slate-400">
-            <ImageOff className="w-6 h-6" /> 등록된 사진이 없어요
-          </div>
-        )}
-      </div>
-
-      <div className="pt-4 space-y-5">
+    <Layout back width="wide">
+      <div className="grid md:grid-cols-2 gap-6 md:gap-10">
+        {/* 왼쪽: 사진 */}
         <div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md text-white ${isFound ? 'bg-indigo-600' : 'bg-amber-500'}`}>
-              {isFound ? '습득물' : '분실물'}
-            </span>
-            <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${item.status === 'OPEN' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
-              {STATUS_LABEL[item.status] ?? item.status}
-            </span>
-            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">{item.category}</span>
-            {item.institution && (
-              <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 flex items-center gap-1">
-                <Building2 className="w-3 h-3" /> 인증 기관 · {item.institution.name}
-              </span>
-            )}
-          </div>
-
-          {editing ? (
-            <input className={`${inputClass} mt-3 font-bold`} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} maxLength={100} />
+          {images.length > 0 ? (
+            <div className="flex overflow-x-auto snap-x snap-mandatory no-scrollbar rounded-lg border border-slate-200 bg-slate-50">
+              {images.map((src, i) => (
+                <div key={src} className="relative shrink-0 w-full aspect-square snap-center">
+                  <img src={src} alt={`${item.title} 사진 ${i + 1}`} className="w-full h-full object-contain" />
+                  {images.length > 1 && (
+                    <span className="absolute bottom-3 right-3 bg-black/50 text-white text-[11px] px-2 py-0.5 rounded">
+                      {i + 1} / {images.length}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
           ) : (
-            <h1 className="text-xl font-bold text-slate-900 mt-2">{item.title}</h1>
+            <div className="w-full aspect-[4/3] rounded-lg border border-slate-200 bg-slate-50 flex flex-col items-center justify-center gap-1 text-sm text-slate-400">
+              <ImageOff className="w-6 h-6" /> 등록된 사진이 없어요
+            </div>
           )}
-          <p className="text-[11px] text-slate-400 mt-1">{fullDate(item.createdAt)}</p>
+          {images.length > 1 && <p className="text-xs text-slate-400 mt-1.5">옆으로 넘기면 사진이 더 있어요.</p>}
         </div>
 
-        <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100 text-sm">
-          <div className="p-4 flex gap-3">
-            <MapPin className={`w-4 h-4 mt-0.5 shrink-0 ${isFound ? 'text-indigo-600' : 'text-amber-500'}`} />
-            <div className="min-w-0 flex-1">
-              <p className="text-[11px] text-slate-400 font-semibold">{isFound ? '보관 장소 (맡긴 곳)' : '잃어버린 장소'}</p>
-              {editing ? (
-                <input className={`${inputClass} mt-1.5`} value={form.place} onChange={(e) => setForm({ ...form, place: e.target.value })} maxLength={200} />
-              ) : isFound && placeValue == null && !session ? (
-                <button type="button" onClick={() => navigate('/login', { state: { from: `/feed/${id}` } })} className="mt-0.5 text-indigo-600 font-semibold flex items-center gap-1 text-sm">
-                  <Lock className="w-3.5 h-3.5" /> 로그인하면 보관 장소가 보여요
-                </button>
-              ) : (
-                <p className="font-semibold text-slate-800 mt-0.5 break-words">{placeValue || '입력되지 않았어요'}</p>
+        {/* 오른쪽: 정보 */}
+        <div className="min-w-0">
+          <div className="flex items-start gap-2">
+            <div className="flex flex-wrap items-center gap-1.5 flex-1">
+              <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded text-white ${isFound ? 'bg-blue-600' : 'bg-amber-500'}`}>
+                {isFound ? '습득물' : '분실물'}
+              </span>
+              <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded ${item.status === 'OPEN' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
+                {STATUS_LABEL[item.status] ?? item.status}
+              </span>
+              <span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{item.category}</span>
+              {item.institution && (
+                <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 flex items-center gap-1">
+                  <Building2 className="w-3 h-3" /> 인증 기관 · {item.institution.name}
+                </span>
               )}
             </div>
+            {menu}
           </div>
-          {editing && (
-            <div className="p-4">
-              <Field label="분류">
-                <select className={inputClass} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
-                  {[...new Set([...CATEGORIES, item.category])].map((c) => <option key={c}>{c}</option>)}
-                </select>
-              </Field>
-            </div>
-          )}
-          {item.author?.name && (
-            <div className="p-4 flex gap-3 items-center">
-              <User className="w-4 h-4 text-slate-400 shrink-0" />
-              <p className="text-slate-600">
-                작성자 <span className="font-semibold text-slate-800">{item.author.name}</span>
-                {item.isMine && <span className="ml-1 text-[11px] text-indigo-600 font-semibold">(나)</span>}
-              </p>
-            </div>
-          )}
-        </div>
 
-        <div>
-          <h2 className="text-xs font-bold text-slate-500 mb-2">{isFound ? '주운 위치' : '잃어버린 지역'}</h2>
-          <KakaoMap
-            className="h-48 rounded-2xl overflow-hidden border border-slate-200"
-            center={{ lat: item.locationLat, lng: item.locationLng }}
-            level={3}
-            interactive={false}
-            markers={[{ id: item.id, lat: item.locationLat, lng: item.locationLng, kind: item.type }]}
-          />
-        </div>
-
-        <div>
-          <h2 className="text-xs font-bold text-slate-500 mb-2">상세 설명</h2>
           {editing ? (
-            <textarea rows={5} className={`${inputClass} resize-none`} value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} maxLength={2000} />
+            <input className={`${inputClass} mt-3 font-semibold`} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} maxLength={100} />
           ) : (
-            <p className="text-sm text-slate-700 leading-relaxed bg-white p-4 rounded-2xl border border-slate-200 whitespace-pre-wrap break-words">
-              {item.content || '작성된 설명이 없어요.'}
-            </p>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900 mt-2">{item.title}</h1>
           )}
-        </div>
+          <p className="text-xs text-slate-400 mt-1">
+            {fullDate(item.createdAt)}
+            {item.author?.name && ` · ${item.author.name}${item.isMine ? ' (나)' : ''}`}
+          </p>
 
-        {editing && (
-          <div className="flex gap-2">
-            <Button variant="secondary" className="flex-1" onClick={() => setEditing(false)}>취소</Button>
-            <Button className="flex-1" loading={saving} onClick={saveEdit}>저장</Button>
-          </div>
-        )}
-
-        {!editing && item.isMine && item.type === 'LOST' && (
-          <Button variant="amber" className="w-full" onClick={() => navigate(`/items/${id}/matches`)}>
-            <Sparkles className="w-4 h-4" /> 내 분실물과 비슷한 습득물 보기
-          </Button>
-        )}
-
-        {!editing && (similar.items.length > 0 || (!similar.ready && images.length > 0)) && (
-          <section>
-            <h2 className="text-sm font-bold text-slate-800 mb-2">사진이 비슷한 {isFound ? '분실물' : '습득물'}</h2>
-            {!similar.ready ? (
-              <p className="text-xs text-slate-400 bg-white rounded-2xl border border-slate-200 p-4">사진을 분석하고 있어요. 잠시 후 다시 확인해주세요.</p>
-            ) : (
-              <div className="space-y-2">
-                {similar.items.map((it) => <ItemCard key={it.id} item={it} layout="row" />)}
+          <dl className="mt-5 border-t border-slate-200 divide-y divide-slate-100 text-sm">
+            <div className="py-3 grid grid-cols-[96px_1fr] gap-3">
+              <dt className="text-slate-500 flex items-center gap-1"><MapPin className="w-3.5 h-3.5" />{isFound ? '보관 장소' : '잃어버린 곳'}</dt>
+              <dd className="min-w-0">
+                {editing ? (
+                  <input className={inputClass} value={form.place} onChange={(e) => setForm({ ...form, place: e.target.value })} maxLength={200} />
+                ) : isFound && placeValue == null && !session ? (
+                  <button type="button" onClick={() => navigate('/login', { state: { from: `/feed/${id}` } })} className="text-blue-600 font-semibold inline-flex items-center gap-1">
+                    <Lock className="w-3.5 h-3.5" /> 로그인하면 보관 장소가 보여요
+                  </button>
+                ) : (
+                  <span className="font-medium text-slate-900 break-words">{placeValue || '입력되지 않았어요'}</span>
+                )}
+              </dd>
+            </div>
+            {editing && (
+              <div className="py-3 grid grid-cols-[96px_1fr] gap-3">
+                <dt className="text-slate-500">분류</dt>
+                <dd>
+                  <select className={inputClass} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+                    {[...new Set([...CATEGORIES, item.category])].map((c) => <option key={c}>{c}</option>)}
+                  </select>
+                </dd>
               </div>
             )}
-          </section>
-        )}
+            <div className="py-3 grid grid-cols-[96px_1fr] gap-3">
+              <dt className="text-slate-500">상세 설명</dt>
+              <dd className="min-w-0">
+                {editing ? (
+                  <textarea rows={5} className={`${inputClass} resize-none`} value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} maxLength={2000} />
+                ) : (
+                  <p className="text-slate-700 leading-relaxed whitespace-pre-wrap break-words">{item.content || '작성된 설명이 없어요.'}</p>
+                )}
+              </dd>
+            </div>
+          </dl>
+
+          {editing && (
+            <div className="flex gap-2 mt-4">
+              <Button variant="secondary" className="flex-1" onClick={() => setEditing(false)}>취소</Button>
+              <Button className="flex-1" loading={saving} onClick={saveEdit}>저장</Button>
+            </div>
+          )}
+
+          {!editing && item.isMine && item.type === 'LOST' && (
+            <Button variant="amber" className="w-full mt-4" onClick={() => navigate(`/items/${id}/matches`)}>
+              내 분실물과 비슷한 습득물 보기
+            </Button>
+          )}
+
+          {!editing && !item.isMine && item.status === 'OPEN' && (
+            isFound ? (
+              <div className="mt-5 rounded-lg border border-blue-100 bg-blue-50/60 p-4 text-sm">
+                <p className="font-semibold text-slate-900">내 물건인가요?</p>
+                <ol className="mt-1.5 space-y-0.5 text-slate-600 list-decimal list-inside">
+                  <li>위 보관 장소로 찾아가세요{item.institution ? ` (${item.institution.name} 운영 시간 확인)` : ''}.</li>
+                  <li>신분증과, 내 물건임을 알 수 있는 특징(색, 안에 든 것 등)을 말해주세요.</li>
+                  <li>직접 보관 중인 글이면 작성자가 적은 장소·설명을 참고하세요.</li>
+                </ol>
+              </div>
+            ) : (
+              <div className="mt-5 rounded-lg border border-amber-100 bg-amber-50/60 p-4 text-sm flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-slate-900">이 물건을 주우셨나요?</p>
+                  <p className="text-slate-600 mt-0.5">습득물로 등록하면 주인이 찾을 수 있어요.</p>
+                </div>
+                <Button variant="secondary" className="shrink-0" onClick={() => navigate('/write?type=FOUND')}>습득물 등록</Button>
+              </div>
+            )
+          )}
+
+          <div className="mt-5">
+            <p className="text-xs font-semibold text-slate-500 mb-1.5">{isFound ? '주운 위치' : '잃어버린 지역'}</p>
+            <KakaoMap
+              className="h-52 rounded-lg overflow-hidden border border-slate-200"
+              center={{ lat: item.locationLat, lng: item.locationLng }}
+              level={3}
+              interactive={false}
+              markers={[{ id: item.id, lat: item.locationLat, lng: item.locationLng, kind: item.type }]}
+            />
+          </div>
+        </div>
       </div>
+
+      {!editing && (
+        <section className="mt-10 pt-6 border-t border-slate-200">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-3">
+            <h2 className="text-lg font-bold text-slate-900">사진이 비슷한 {isFound ? '분실물' : '습득물'}</h2>
+            <span className="text-xs text-slate-400">유사도 {Math.round(MIN_SIMILARITY * 100)}% 이상</span>
+          </div>
+          <SimilarityHelp className="mb-4" />
+          {images.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-600">
+              이 글에는 사진이 없어서 사진 비교를 할 수 없어요.
+              {!isFound && (
+                <button type="button" onClick={() => navigate('/search')} className="ml-1 font-semibold text-blue-600 hover:underline">
+                  다른 사진으로 찾아보기 →
+                </button>
+              )}
+            </div>
+          ) : !similar.ready ? (
+            <p className="rounded-lg bg-slate-50 border border-slate-200 p-4 text-sm text-slate-500">
+              {similar.gaveUp ? '사진 분석이 아직 끝나지 않았어요. 잠시 후 새로고침해 주세요.' : 'AI가 사진을 분석하고 있어요. 끝나면 여기에 바로 보여드릴게요.'}
+            </p>
+          ) : similar.items.length === 0 ? (
+            <NoSimilarNotice
+              targetLabel={isFound ? '분실물' : '습득물'}
+              onAction={isFound ? undefined : () => navigate('/feed?source=public')}
+              actionLabel="경찰청 유실물에서 직접 찾아보기"
+            />
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-4 gap-y-6">
+              {similar.items.map((it) => <ItemCard key={it.id} item={it} />)}
+            </div>
+          )}
+        </section>
+      )}
     </Layout>
   );
 }

@@ -4,6 +4,7 @@ import { CheckCircle2, Loader2, XCircle } from 'lucide-react';
 import AuthCard from '../components/AuthCard';
 import { Button } from '../components/ui';
 import { api, getSession, saveSession } from '../lib/api';
+import { toast } from '../lib/toast';
 
 export default function VerifyEmail() {
   const [params] = useSearchParams();
@@ -19,6 +20,7 @@ export default function VerifyEmail() {
     api('/auth/email/verify', { method: 'POST', auth: false, body: { token } })
       .then(() => {
         setStatus('success');
+        toast.success('이메일 인증이 완료되었습니다');
         if (getSession()) saveSession({ emailVerified: true });
       })
       .catch((e) => {
@@ -30,11 +32,11 @@ export default function VerifyEmail() {
   const loggedIn = !!getSession();
 
   return (
-    <AuthCard subtitle="이메일 인증">
-      <div className="text-center py-2">
+    <AuthCard>
+      <div className="text-center pt-4">
         {status === 'verifying' && (
           <>
-            <Loader2 className="w-10 h-10 text-indigo-600 animate-spin mx-auto" />
+            <Loader2 className="w-10 h-10 text-blue-600 animate-spin mx-auto" />
             <p className="text-sm font-bold text-slate-800 mt-4">인증하는 중이에요...</p>
           </>
         )}

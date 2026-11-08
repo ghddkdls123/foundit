@@ -5,6 +5,7 @@ import AuthCard from '../components/AuthCard';
 import { Button, Field, inputClass } from '../components/ui';
 import { api, rememberName } from '../lib/api';
 import useCooldown from '../lib/useCooldown';
+import { toast } from '../lib/toast';
 
 // 백엔드 규칙: 8자 이상, 영문+숫자, 72바이트 이하
 function passwordChecks(pw) {
@@ -44,6 +45,7 @@ export default function SignupGeneral() {
       });
       rememberName(form.email, form.name.trim());
       setDone(true);
+      toast.success('회원가입이 완료되었습니다');
       startCooldown();
     } catch (err) {
       setError(err.message);
@@ -56,15 +58,16 @@ export default function SignupGeneral() {
     try {
       await api('/auth/email/send', { method: 'POST', auth: false, body: { email: form.email.trim() } });
       startCooldown();
+      toast.success('인증 메일을 다시 보냈어요');
     } catch (err) {
-      alert(err.message);
+      toast.error(err.message);
     }
   };
 
   if (done) {
     return (
-      <AuthCard subtitle="가입을 환영해요!">
-        <div className="text-center">
+      <AuthCard>
+        <div className="text-center pt-4">
           <span className="mx-auto w-14 h-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center">
             <MailCheck className="w-7 h-7" />
           </span>
@@ -86,11 +89,12 @@ export default function SignupGeneral() {
 
   return (
     <AuthCard
-      subtitle="회원가입"
+      title="회원가입"
+      desc="가입하면 습득물·분실물 등록과 사진 검색을 쓸 수 있어요."
       footer={
         <>
           이미 계정이 있으신가요?
-          <Link to="/login" className="font-semibold text-indigo-600 ml-1.5">로그인</Link>
+          <Link to="/login" className="font-semibold text-blue-600 ml-1.5 hover:underline">로그인</Link>
         </>
       }
     >
@@ -116,7 +120,7 @@ export default function SignupGeneral() {
           {form.confirm && !confirmOk && <span className="block text-[11px] text-rose-500 mt-1">비밀번호가 서로 달라요.</span>}
         </Field>
         {error && <p className="text-xs text-rose-500 whitespace-pre-line">{error}</p>}
-        <Button type="submit" className="w-full" loading={loading}>가입하기</Button>
+        <Button type="submit" className="w-full h-11" loading={loading}>가입하기</Button>
       </form>
     </AuthCard>
   );

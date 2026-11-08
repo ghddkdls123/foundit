@@ -1,3 +1,5 @@
+import { toast } from './toast';
+
 // 모든 백엔드 호출은 이 파일을 거칩니다.
 // 주소는 항상 /api/... 로 쓰고, 실제 서버 주소는 vite.config.js 의 proxy 가 정합니다.
 
@@ -160,7 +162,10 @@ export async function api(path, { method = 'GET', body, form, query, auth = true
 
   if (!res.ok) {
     // 토큰이 만료됐으면 세션을 정리 (로그인 요청 자체의 401은 제외)
-    if (res.status === 401 && token && !path.startsWith('/auth/')) clearSession();
+    if (res.status === 401 && token && !path.startsWith('/auth/')) {
+      clearSession();
+      toast.error('로그인이 만료되었어요. 다시 로그인해주세요.');
+    }
     throw new ApiError(res.status, toMessage(data, res.status));
   }
   return data;
