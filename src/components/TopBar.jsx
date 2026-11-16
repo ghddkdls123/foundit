@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { Plus, Search } from 'lucide-react';
+import { MessageCircle, Plus, Search } from 'lucide-react';
 import useSession from '../lib/useSession';
+import useUnread from '../lib/useUnread';
 
 const LINKS = [
   { to: '/', label: '홈', end: true },
@@ -13,6 +14,7 @@ const LINKS = [
 export default function TopBar() {
   const navigate = useNavigate();
   const session = useSession();
+  const unread = useUnread();
   const [q, setQ] = useState('');
 
   const initial = (session?.name || session?.email || '').trim().charAt(0).toUpperCase();
@@ -72,6 +74,21 @@ export default function TopBar() {
           >
             <Plus className="w-4 h-4" /> 등록하기
           </button>
+          {session && (
+            <button
+              type="button"
+              onClick={() => navigate('/chats')}
+              className="relative w-9 h-9 rounded-md hover:bg-slate-100 flex items-center justify-center text-slate-600"
+              aria-label={unread > 0 ? `채팅, 안 읽은 메시지 ${unread}개` : '채팅'}
+            >
+              <MessageCircle className="w-5 h-5" />
+              {unread > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center">
+                  {unread > 99 ? '99+' : unread}
+                </span>
+              )}
+            </button>
+          )}
           {session ? (
             <button
               type="button"

@@ -12,6 +12,7 @@ export default defineConfig({
         target: 'https://d2561q9uqrldal.cloudfront.net',
         changeOrigin: true,
         secure: true,
+        ws: true, // 실시간 채팅(Socket.IO, /api/socket.io)도 넘겨줌
       },
     },
   },

@@ -6,16 +6,7 @@ import { Button, Field, inputClass } from '../components/ui';
 import { api, rememberName } from '../lib/api';
 import useCooldown from '../lib/useCooldown';
 import { toast } from '../lib/toast';
-
-// 백엔드 규칙: 8자 이상, 영문+숫자, 72바이트 이하
-function passwordChecks(pw) {
-  const bytes = new TextEncoder().encode(pw).length;
-  return [
-    { ok: pw.length >= 8, label: '8자 이상' },
-    { ok: /[A-Za-z]/.test(pw) && /\d/.test(pw), label: '영문과 숫자 포함' },
-    { ok: bytes <= 72, label: '너무 길지 않게 (한글 24자, 영문 72자 이하)' },
-  ];
-}
+import { passwordChecks } from '../lib/password';
 
 export default function SignupGeneral() {
   const navigate = useNavigate();

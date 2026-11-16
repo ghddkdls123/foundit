@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { isLoggedIn } from './lib/api';
 import Home from './pages/Home';
@@ -14,6 +15,9 @@ import VerifyEmail from './pages/VerifyEmail';
 import MfaSetup from './pages/MfaSetup';
 import VerifyInstitution from './pages/VerifyInstitution';
 import MyPage from './pages/MyPage';
+import ChatList from './pages/ChatList';
+import ChatRoom from './pages/ChatRoom';
+import { startChat } from './lib/chat';
 import Toaster from './components/Toaster';
 
 /** 로그인이 필요한 화면: 로그인 후 원래 화면으로 돌아옵니다 */
@@ -26,6 +30,8 @@ function RequireAuth({ children }) {
 }
 
 export default function App() {
+  // 로그인돼 있으면 실시간 채팅 연결 (로그인/로그아웃에 맞춰 자동으로 연결·해제)
+  useEffect(() => startChat(), []);
   return (
     <BrowserRouter>
       <Routes>
@@ -44,6 +50,8 @@ export default function App() {
         <Route path="/mfa" element={<RequireAuth><MfaSetup /></RequireAuth>} />
         <Route path="/verify-institution" element={<RequireAuth><VerifyInstitution /></RequireAuth>} />
         <Route path="/mypage" element={<RequireAuth><MyPage /></RequireAuth>} />
+        <Route path="/chats" element={<RequireAuth><ChatList /></RequireAuth>} />
+        <Route path="/chats/:id" element={<RequireAuth><ChatRoom /></RequireAuth>} />
 
         {/* 예전 주소 호환 */}
         <Route path="/Home" element={<Navigate to="/" replace />} />

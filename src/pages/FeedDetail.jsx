@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Building2, CheckCircle2, Edit3, ImageOff, Lock, MapPin, MoreVertical, RotateCcw, Trash2 } from 'lucide-react';
+import { Building2, CheckCircle2, Edit3, ImageOff, Lock, MapPin, MessageCircle, MoreVertical, RotateCcw, ShieldAlert, Trash2 } from 'lucide-react';
 import Layout from '../components/Layout';
 import KakaoMap from '../components/KakaoMap';
 import ItemCard from '../components/ItemCard';
@@ -25,6 +25,8 @@ export default function FeedDetail() {
   const [form, setForm] = useState({});
   const [saving, setSaving] = useState(false);
   const [similar, setSimilar] = useState({ ready: true, items: [] });
+  const [askOpen, setAskOpen] = useState(false); // "작성자에게 문의하기" 안내 창
+  const [asking, setAsking] = useState(false);
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -121,7 +123,12 @@ export default function FeedDetail() {
 
   const remove = async () => {
     setMenuOpen(false);
-    if (!window.confirm('이 게시글을 삭제할까요? 사진도 함께 지워집니다.')) return;
+    if (
+      !window.confirm(
+        '이 게시글을 삭제할까요?\n\n사진과 이 글로 나눈 채팅 대화도 모두 함께 지워져요.\n물건을 찾았거나 돌려줬다면 삭제 대신 "반환 완료로 변경"을 써 주세요.',
+      )
+    )
+      return;
     try {
       await api(`/items/${id}`, { method: 'DELETE' });
       toast.success('삭제되었습니다');
@@ -154,6 +161,31 @@ export default function FeedDetail() {
   );
 
   const images = item.imageUrls ?? [];
+
+  const openAsk = () => {
+    if (!session) {
+      navigate('/login', { state: { from: `/feed/${id}` } });
+      return;
+    }
+    setAskOpen(true);
+  };
+
+  const startChat = async () => {
+    setAsking(true);
+    try {
+      const { conversationId } = await api(`/items/${id}/conversations`, { method: 'POST' });
+      setAskOpen(false);
+      navigate(`/chats/${conversationId}`);
+    } catch (e) {
+      if (e.status === 403) {
+        toast.error('이메일 인증을 마친 뒤에 문의할 수 있어요. 내 정보에서 인증 메일을 받아주세요.');
+      } else {
+        toast.error(e.message);
+      }
+    } finally {
+      setAsking(false);
+    }
+  };
 
   return (
     <Layout back width="wide">
@@ -262,6 +294,12 @@ export default function FeedDetail() {
           )}
 
           {!editing && !item.isMine && item.status === 'OPEN' && (
+            <Button className="w-full mt-4" onClick={openAsk}>
+              <MessageCircle className="w-4 h-4" /> {item.institution ? `${item.institution.name}에 문의하기` : '작성자에게 문의하기'}
+            </Button>
+          )}
+
+          {!editing && !item.isMine && item.status === 'OPEN' && (
             isFound ? (
               <div className="mt-5 rounded-lg border border-blue-100 bg-blue-50/60 p-4 text-sm">
                 <p className="font-semibold text-slate-900">내 물건인가요?</p>
@@ -327,6 +365,23 @@ export default function FeedDetail() {
             </div>
           )}
         </section>
+      )}
+
+      {askOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4" onClick={() => !asking && setAskOpen(false)}>
+          <div className="w-full max-w-sm bg-white rounded-xl p-5 shadow-xl" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <p className="text-base font-bold text-slate-900">{item.institution ? `${item.institution.name}에 문의할까요?` : '작성자에게 문의할까요?'}</p>
+            <p className="text-sm text-slate-500 mt-1 truncate">“{item.title}” 글로 대화를 시작해요.</p>
+            <div className="mt-4 rounded-lg bg-amber-50 border border-amber-100 p-3 text-[13px] text-amber-800 flex gap-2">
+              <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+              <p>전화번호, 계좌번호 같은 개인정보는 신중하게 공유하세요. 물건은 가능하면 보관 장소나 사람이 많은 곳에서 주고받으세요.</p>
+            </div>
+            <div className="flex gap-2 mt-5">
+              <Button variant="secondary" className="flex-1" disabled={asking} onClick={() => setAskOpen(false)}>취소</Button>
+              <Button className="flex-1" loading={asking} onClick={startChat}>대화 시작</Button>
+            </div>
+          </div>
+        </div>
       )}
     </Layout>
   );
