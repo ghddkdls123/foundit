@@ -1,25 +1,19 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
-// https://vite.dev/config/
+// 프론트 코드는 항상 /api/... 로 요청하고, 개발 서버가 아래 주소로 넘겨줍니다.
+// (예전 Elastic Beanstalk 주소는 막혀서 502가 났음 → CloudFront 주소로 변경)
 export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://refind-backend.ap-southeast-2.elasticbeanstalk.com/', // 팀원의 백엔드 서버 주소 (예: http://localhost:8080 또는 배포된 서버 주소)
+        target: 'https://d2561q9uqrldal.cloudfront.net',
         changeOrigin: true,
-        secure: false,
-      }
-    }
+        secure: true,
+        ws: true, // 실시간 채팅(Socket.IO, /api/socket.io)도 넘겨줌
+      },
+    },
   },
-  build: {
-    rollupOptions: {
-      // 빌드할 때 제외하고 싶은 파일이나 폴더 경로 지정
-      external: ['/src/pages/MapPage.jsx'],
-      external: ['/src/pages/Home.jsx'] 
-
-    }
-  }
 })

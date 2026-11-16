@@ -1,119 +1,174 @@
-import React, { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import TopBar from '../components/TopBar';
-import BottomNav from '../components/BottomNavBar';
-import { Sparkles } from 'lucide-react';
+import { ArrowRight, Search } from 'lucide-react';
+import Layout from '../components/Layout';
+import ItemCard from '../components/ItemCard';
+import { CategoryChips, Empty, ErrorBox, SkeletonGrid } from '../components/ui';
+import { api } from '../lib/api';
+import useSession from '../lib/useSession';
 
 export default function Home() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('전체');
+  const session = useSession();
+  const [keyword, setKeyword] = useState('');
+  const searchRef = useRef(null);
+  const focusSearch = () => {
+    searchRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    searchRef.current?.focus();
+  };
+  const [category, setCategory] = useState('');
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [reload, setReload] = useState(0);
+  const [stats, setStats] = useState(null); // { all, internal }
 
-  // 분실물 임시 데이터
-  const lostItems = [
-    { id: 1, title: '검은색 가죽 지갑', location: '강남역 2번 출구', date: '5분 전', category: '지갑', img: 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQbXCgMF6ClgGjHouWKoCRfF98a6mA7rUizEalHsyh0bA&s' },
-    { id: 2, title: '애플 에어팟 프로', location: '한강 반포지구', date: '2시간 전', category: '전자기기', img: 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQqCKt6YlOLWnqYh6kyvfbOLQID5759bkY50N27uG_8cg&s=10' },
-    { id: 3, title: '베이지색 우산', location: '교보문고 잠실점', date: '3시간 전', category: '우산', img: 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSqB8jtBZlyvUaRiJ65PRDZ8PlzGbvlZl5cgRwcW37Utg&s' },
-    { id: 4, title: '아이패드 에어 5세대', location: '학교 도서관 3층', date: '5시간 전', category: '전자기기', img: 'https://images.unsplash.com/photo-1544244015-0df4b3ffc6b0?q=80&w=400&auto=format&fit=crop' },
-  ];
+  // 홈 위쪽 숫자: 전체 습득물(최근 30일 공공 포함) / foundit 등록
+  useEffect(() => {
+    Promise.all([api('/feed', { query: { limit: 1 } }), api('/feed', { query: { source: 'internal', limit: 1 } })])
+      .then(([a, b]) => setStats({ all: a?.total ?? 0, internal: b?.total ?? 0 }))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    setError('');
+    // 넉넉히 받아서 사진 있는 것을 먼저 10개 보여줌
+    api('/feed', { query: { category, limit: 30 } })
+      .then((data) => {
+        if (!alive) return;
+        const list = data?.items ?? [];
+        const sorted = [...list.filter((x) => x.thumbnailUrl), ...list.filter((x) => !x.thumbnailUrl)];
+        setItems(sorted.slice(0, 10));
+      })
+      .catch((e) => alive && setError(e.message))
+      .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [category, reload]);
+
+  const onSearch = (e) => {
+    e.preventDefault();
+    const q = keyword.trim();
+    navigate(q ? `/feed?keyword=${encodeURIComponent(q)}` : '/feed');
+  };
+
+  const onPhotoClick = () => {
+    if (!session) {
+      navigate('/login', { state: { from: '/search', reason: '사진으로 찾기는 로그인 후 이용할 수 있어요.' } });
+      return;
+    }
+    navigate('/search');
+  };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col antialiased">
-      <TopBar />
+    <Layout>
+      <section className="pb-6 sm:pb-8 border-b border-slate-200">
+        <p className="text-sm text-slate-500">{session ? `${session.name || '회원'}님, 안녕하세요` : '캠퍼스 분실물 찾기'}</p>
+        <h1 className="text-[22px] leading-snug sm:text-2xl md:text-3xl font-bold tracking-tight text-slate-900 mt-1">잃어버린 물건, Foundit에서 찾아보세요</h1>
+        {stats && (
+          <p className="text-sm text-slate-500 mt-2">
+            지금 찾을 수 있는 습득물 <b className="text-slate-900">{stats.all.toLocaleString()}건</b>
+            <span className="text-slate-300 mx-2">|</span>
+            Foundit에 직접 등록 <b className="text-blue-600">{stats.internal.toLocaleString()}건</b>
+          </p>
+        )}
 
-      <main className="flex-grow pt-20 px-6 pb-24 max-w-7xl mx-auto w-full">
-        
-        <section className="my-6">
-          <h1 className="text-2xl font-bold tracking-tight text-slate-800">안녕하세요, 길동님 👋</h1>
-          <p className="text-xs text-slate-500 mt-1">오늘 잃어버린 물건이나 습득한 물건을 검색해보세요.</p>
-
-          <div className="relative mt-5">
-            <div className="absolute inset-y-0 left-0 flex items-center pl-4 text-slate-400 pointer-events-none">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-            </div>
-            <input 
-              type="text" 
-              placeholder="무엇을 잃어버리셨나요?" 
-              className="w-full pl-12 pr-16 py-4 rounded-2xl bg-white border border-slate-200 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition shadow-sm"
+        <form onSubmit={onSearch} className="mt-5 flex gap-2 max-w-2xl">
+          <div className="relative flex-1">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+            <input
+              ref={searchRef}
+              type="search"
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              placeholder="잃어버린 물건 이름 (예: 지갑)"
+              className="w-full h-11 pl-10 pr-3 rounded-md border border-slate-300 text-sm placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
             />
-            
-            <button className="absolute inset-y-2 right-2 flex items-center justify-center w-20 h-9 rounded-xl border border-indigo-200/60 shadow-sm transition-all duration-300 group overflow-hidden bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 bg-[length:200%_200%] animate-gradient hover:scale-105 hover:shadow-indigo-200 hover:shadow-md">
-              <div className="flex items-center gap-1 text-white transition-transform duration-200 group-hover:-translate-y-0.5">
-                <Sparkles className="w-4 h-4 fill text-white animate-pulse" />
-                <span className="font-semibold text-sm tracking-wide text-white">AI</span>
-              </div>
-            </button>
           </div>
-        </section>
-
-
-
-        <section className="my-6">
-          <div 
-            className="flex gap-2 overflow-x-auto pb-2 px-1"
-            style={{
-              scrollbarWidth: 'none',
-              msOverflowStyle: 'none', 
-            }}
+          <button type="submit" className="h-11 px-4 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold">
+            검색
+          </button>
+          <button
+            type="button"
+            onClick={onPhotoClick}
+            className="h-11 px-4 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-sm font-semibold whitespace-nowrap"
           >
-            <style>{`
-              div::-webkit-scrollbar {
-                display: none; /* 크롬, 사파리 스크롤바 숨김 */
-              }
-            `}</style>
+            <span className="sm:hidden">사진</span>
+            <span className="hidden sm:inline">사진으로 찾기</span>
+          </button>
+        </form>
 
-            {['전체', '지갑', '전자기기', '우산', '의류', '가방','귀중품','기타'].map((tab) => (
+        <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm">
+          <button type="button" onClick={() => navigate('/write?type=FOUND')} className="inline-flex items-center gap-1 font-semibold text-blue-600 hover:underline">
+            물건을 주웠어요 <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+          <button type="button" onClick={() => navigate('/write?type=LOST')} className="inline-flex items-center gap-1 font-semibold text-amber-600 hover:underline">
+            물건을 잃어버렸어요 <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+          <button type="button" onClick={() => navigate('/map')} className="inline-flex items-center gap-1 font-semibold text-slate-600 hover:underline">
+            지도에서 보기 <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        <ol className="mt-6 sm:mt-8 grid sm:grid-cols-3 gap-2 sm:gap-3">
+          {[
+            ['1', '사진이나 이름으로 검색', '눌러서 바로 검색해 보세요.', focusSearch],
+            ['2', 'AI가 비슷한 습득물을 찾아요', '사진을 올리면 모양이 비슷한 물건을 찾아요.', onPhotoClick],
+            ['3', '보관 장소로 찾아가요', '지도에서 습득물 위치와 보관 장소를 확인해요.', () => navigate('/map')],
+          ].map(([n, title, desc, onClick]) => (
+            <li key={n}>
               <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`px-4 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition ${
-                  activeTab === tab 
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20' 
-                    : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-                }`}
+                type="button"
+                onClick={onClick}
+                className="group w-full h-full flex items-center sm:items-start gap-3 px-3 py-2.5 sm:p-4 rounded-lg bg-slate-50 border border-slate-200 text-left hover:border-blue-300 hover:bg-blue-50/50 transition"
               >
-                {tab}
+                <span className="w-7 h-7 shrink-0 rounded-full bg-blue-600 text-white text-sm font-bold flex items-center justify-center">{n}</span>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-sm font-semibold text-slate-900">{title}</span>
+                  <span className="hidden sm:block text-xs text-slate-500 mt-0.5 leading-relaxed">{desc}</span>
+                </span>
+                <ArrowRight className="w-4 h-4 text-slate-300 group-hover:text-blue-600 self-center shrink-0 transition" />
               </button>
-            ))}
-          </div>
-        </section>
+            </li>
+          ))}
+        </ol>
+      </section>
 
-        <section className="my-8">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider">실시간 습득물 피드</h3>
-          <span 
-  onClick={() => navigate('/feed')}
-  className="text-xs text-indigo-600 cursor-pointer hover:underline font-medium"
->
-  전체보기
-</span>
+      <section className="pt-6 sm:pt-8">
+        <div className="flex items-end justify-between gap-4 mb-3">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900">최근 습득물</h2>
+            <p className="text-xs text-slate-400 mt-0.5">Foundit에 등록된 습득물과 경찰청 유실물(최근 30일)</p>
           </div>
-            
-          <div className="grid grid-cols-2 gap-4">
-            {lostItems.map(item => (
-              <div key={item.id} className="bg-white rounded-2xl overflow-hidden border border-slate-200 hover:border-indigo-300 transition cursor-pointer flex flex-col shadow-sm">
-                <div className="relative h-36 bg-slate-100">
-                  <img src={item.img} alt={item.title} className="w-full h-full object-cover" />
-                  <span className="absolute top-2 left-2 bg-white/90 backdrop-blur-sm text-indigo-600 text-[10px] font-bold px-2 py-0.5 rounded-md shadow-sm">
-                    {item.category}
-                  </span>
-                </div>
-                <div className="p-3.5 flex flex-col justify-between flex-grow">
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-800 truncate">{item.title}</h4>
-                    <p className="text-[11px] text-slate-500 mt-1 truncate">📍 {item.location}</p>
-                  </div>
-                  <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-100">
-                    <span className="text-[10px] text-slate-400">{item.date}</span>
-                    <span className="text-[10px] font-semibold text-indigo-600">상세보기 &rarr;</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
+          <button
+            type="button"
+            onClick={() => navigate(category ? `/feed?category=${encodeURIComponent(category)}` : '/feed')}
+            className="text-sm text-slate-500 hover:text-slate-900 shrink-0"
+          >
+            전체보기 →
+          </button>
+        </div>
+        <CategoryChips value={category} onChange={setCategory} />
 
-      </main>
-      <BottomNav />
-    </div>
+        <div className="mt-5">
+          {loading ? (
+            <SkeletonGrid />
+          ) : error ? (
+            <ErrorBox message={error} onRetry={() => setReload((n) => n + 1)} />
+          ) : items.length === 0 ? (
+            <Empty title="아직 등록된 습득물이 없어요" desc={category ? `'${category}' 분류에는 최근 30일 습득물이 없어요.` : undefined} />
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-4 gap-y-6">
+              {items.map((it) => (
+                <ItemCard key={`${it.source}-${it.id}`} item={it} />
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+    </Layout>
   );
 }

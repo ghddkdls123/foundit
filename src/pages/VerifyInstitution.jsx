@@ -1,215 +1,136 @@
-import React, { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Upload, FileText, AlertCircle, Mail, CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, Circle, Clock } from 'lucide-react';
+import Layout from '../components/Layout';
+import { Button, ErrorBox, Field, Spinner, inputClass } from '../components/ui';
+import { api } from '../lib/api';
+import useSession from '../lib/useSession';
+import { toast } from '../lib/toast';
 
 export default function VerifyInstitution() {
   const navigate = useNavigate();
-  const [formData, setFormData] = useState({ 
-    instName: '', 
-    managerName: '', 
-    email: '', 
-    password: '' 
-  });
-  const [institutionFile, setInstitutionFile] = useState(null);
-  const [isEmailSent, setIsEmailSent] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const session = useSession();
+  const [institutions, setInstitutions] = useState(null);
+  const [loadError, setLoadError] = useState('');
+  const [form, setForm] = useState({ institutionId: '', department: '', manager: '', contact: '', note: '' });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [done, setDone] = useState(false);
 
-  const getAuthToken = () => {
-    return (
-      localStorage.getItem('accessToken') ||
-      localStorage.getItem('token') ||
-      localStorage.getItem('jwt') ||
-      localStorage.getItem('access_token') ||
-      ''
-    );
-  };
+  useEffect(() => {
+    api('/institutions')
+      .then((d) => setInstitutions(Array.isArray(d) ? d : []))
+      .catch((e) => setLoadError(e.message));
+  }, []);
 
-  const handleEmailVerify = async () => {
-    if (!formData.email) {
-      alert('먼저 기관 이메일을 입력해주세요.');
-      return;
-    }
+  const emailOk = !!session?.emailVerified;
+  const mfaOk = !!session?.mfaVerified;
+  const ready = emailOk && mfaOk;
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
-    try {
-      const response = await fetch('https://d2561q9uqrldal.cloudfront.net/api/auth/email/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: formData.email }),
-      });
-
-      if (response.ok) {
-        setIsEmailSent(true);
-        alert(`${formData.email}로 인증 메일이 발송되었습니다. 메일함을 확인해주세요.`);
-      } else {
-        const data = await response.json().catch(() => ({}));
-        alert(data.message || '인증 메일 전송에 실패했습니다.');
-      }
-    } catch (error) {
-      console.error('이메일 전송 에러:', error);
-      alert('서버 통신 중 오류가 발생했습니다.');
-    }
-  };
-
-  const handleSubmit = async (e) => {
+  const submit = async (e) => {
     e.preventDefault();
-    
-    if (!institutionFile) {
-      alert('기관 증명 파일(공문 또는 재직증명서 등)을 업로드해주세요.');
-      return;
-    }
-
-    setLoading(true);
-
+    if (!form.institutionId) return setError('기관을 골라주세요.');
+    setSubmitting(true);
+    setError('');
+    const evidence = [
+      form.department && `부서: ${form.department}`,
+      form.manager && `담당자: ${form.manager}`,
+      form.contact && `연락처: ${form.contact}`,
+      form.note && `설명: ${form.note}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
     try {
-      const token = getAuthToken();
-      const response = await fetch('https://d2561q9uqrldal.cloudfront.net/api/institutions/verification-requests', {
+      await api('/institutions/verification-requests', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify({
-          institutionId: 1, // 소속 기관 ID
-          evidence: `기관명: ${formData.instName}, 담당자: ${formData.managerName}, 첨부파일: ${institutionFile.name}`,
-        }),
+        body: { institutionId: Number(form.institutionId), evidence: evidence || undefined },
       });
-
-      const data = await response.json().catch(() => ({}));
-
-      if (response.ok) {
-        alert('기관 인증 신청이 완료되었습니다!\n운영자 승인 후 기관 관리자 권한으로 전환됩니다.');
-        navigate('/mypage');
-      } else {
-        alert(data.message || '기관 인증 신청에 실패했습니다.');
-      }
-    } catch (error) {
-      console.error('기관 인증 신청 에러:', error);
-      alert('서버 통신 중 에러가 발생했습니다.');
+      setDone(true);
+      toast.success('기관 인증 신청이 접수되었습니다');
+    } catch (err) {
+      setError(err.message);
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
+
+  if (done) {
+    return (
+      <Layout title="기관 인증 신청" back width="narrow">
+        <div className="text-center py-12">
+          <Clock className="w-12 h-12 text-blue-500 mx-auto" />
+          <p className="text-base font-bold text-slate-800 mt-3">신청이 접수됐어요</p>
+          <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+            운영자가 확인 후 승인하면 기관 관리자 계정으로 바뀌어요.
+            <br />
+            승인 후에는 다시 로그인해주세요.
+          </p>
+          <Button variant="secondary" className="w-full mt-6" onClick={() => navigate('/mypage', { replace: true })}>내 정보로</Button>
+        </div>
+      </Layout>
+    );
+  }
+
+  const Step = ({ ok, label, action, onClick }) => (
+    <div className="flex items-center gap-2.5 py-2">
+      {ok ? <CheckCircle2 className="w-5 h-5 text-emerald-500" /> : <Circle className="w-5 h-5 text-slate-300" />}
+      <span className={`text-sm flex-1 ${ok ? 'text-slate-500' : 'text-slate-800 font-semibold'}`}>{label}</span>
+      {!ok && (
+        <button type="button" onClick={onClick} className="text-xs font-bold text-blue-600">
+          {action}
+        </button>
+      )}
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
-        <span className="bg-emerald-50 text-emerald-600 text-xs font-semibold px-2.5 py-1 rounded-full">
-          기관 관리자 전용
-        </span>
-        <h1 className="text-xl font-bold text-slate-800 mt-3 mb-1">기관 계정 인증 신청</h1>
-        <p className="text-xs text-slate-500 mb-6">학교 분실물 센터 및 관리부서 등록을 위한 서류를 제출해주세요.</p>
+    <Layout title="기관 인증 신청" back width="narrow">
+      <p className="text-xs text-slate-500 leading-relaxed pt-1">
+        학교 분실물센터, 학생지원팀 같은 담당 부서라면 기관 관리자로 인증받을 수 있어요. 기관 관리자가 올린 습득물에는 <b className="text-blue-600">인증 기관</b> 표시가 붙어요.
+      </p>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-slate-400 mb-1">기관/부서 명</label>
-            <input
-              type="text"
-              required
-              placeholder="예: 학생지원팀 / 중앙도서관 분실물센터"
-              value={formData.instName}
-              onChange={(e) => setFormData({...formData, instName: e.target.value})}
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-400 mb-1">담당자 이름</label>
-            <input
-              type="text"
-              required
-              placeholder="관리자 이름"
-              value={formData.managerName}
-              onChange={(e) => setFormData({...formData, managerName: e.target.value})}
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-400 mb-1">기관 이메일</label>
-            <div className="flex gap-2">
-              <input
-                type="email"
-                required
-                placeholder="institution@korea.or.kr"
-                value={formData.email}
-                onChange={(e) => setFormData({...formData, email: e.target.value})}
-                className="flex-grow px-4 py-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-              <button
-                type="button"
-                onClick={handleEmailVerify}
-                className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-xl transition flex items-center gap-1 flex-shrink-0"
-              >
-                {isEmailSent ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> : <Mail className="w-3.5 h-3.5 text-emerald-600" />}
-                {isEmailSent ? '재전송' : '이메일 인증'}
-              </button>
-            </div>
-            {isEmailSent && (
-              <p className="text-[10px] text-emerald-600 mt-1 pl-1">✔️ 인증 메일이 발송되었습니다. 메일함의 링크를 확인해주세요.</p>
-            )}
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-400 mb-1">비밀번호</label>
-            <input
-              type="password"
-              required
-              placeholder="••••••••"
-              value={formData.password}
-              onChange={(e) => setFormData({...formData, password: e.target.value})}
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
-          </div>
-
-          {/* 5. 기관 증명 파일 업로드 */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-400 mb-1">기관 증명 파일 (재직증명서, 공문 등)</label>
-            <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-slate-200 border-dashed rounded-xl cursor-pointer bg-slate-50 hover:bg-slate-100 transition">
-              <div className="flex flex-col items-center justify-center pt-3 pb-3 px-4 text-center">
-                {institutionFile ? (
-                  <div className="flex items-center gap-2 text-xs text-emerald-600 font-semibold">
-                    <FileText className="w-4 h-4" />
-                    <span className="truncate max-w-[240px]">{institutionFile.name}</span>
-                  </div>
-                ) : (
-                  <>
-                    <Upload className="w-5 h-5 text-slate-400 mb-1" />
-                    <p className="text-xs text-slate-500"><span className="font-semibold text-emerald-600">파일 업로드</span> 또는 여기를 드래그하세요</p>
-                    <p className="text-[10px] text-slate-400 mt-0.5">PDF, PNG, JPG (최대 10MB)</p>
-                  </>
-                )}
-              </div>
-              <input 
-                type="file" 
-                required
-                className="hidden" 
-                accept=".pdf,.png,.jpg,.jpeg"
-                onChange={(e) => {
-                  if (e.target.files && e.target.files[0]) {
-                    setInstitutionFile(e.target.files[0]);
-                  }
-                }}
-              />
-            </label>
-          </div>
-
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2.5">
-            <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
-            <div className="text-[11px] text-amber-800 leading-relaxed">
-              <span className="font-bold">안내:</span> 공문 양식이나 필요한 증빙 서류 가이드는 <button type="button" onClick={() => alert('관련 서류 다운로드 및 가이드 안내 페이지 준비 중')} className="underline font-semibold hover:text-amber-900">여기서 확인</button>하실 수 있습니다.
-            </div>
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3 rounded-xl transition text-sm shadow-sm disabled:opacity-50"
-          >
-            {loading ? '신청 처리 중' : '기관 인증 신청하기'}
-          </button>
-
-        </form>
+      <div className="bg-white rounded-lg border border-slate-200 px-4 py-2 mt-4 divide-y divide-slate-100">
+        <Step ok={emailOk} label="이메일 인증" action="인증하기" onClick={() => navigate('/mypage')} />
+        <Step ok={mfaOk} label="2단계 인증(MFA) 등록" action="등록하기" onClick={() => navigate('/mfa')} />
       </div>
-    </div>
+      {!ready && <p className="text-[11px] text-amber-600 mt-2">위 두 가지를 먼저 마쳐야 신청할 수 있어요. 다른 기기에서 메일 인증을 했다면 다시 로그인해주세요.</p>}
+
+      {loadError ? (
+        <div className="mt-4"><ErrorBox message={loadError} /></div>
+      ) : !institutions ? (
+        <Spinner />
+      ) : (
+        <form onSubmit={submit} className="space-y-4 mt-5">
+          <Field label="기관">
+            <select className={`${inputClass}`} value={form.institutionId} onChange={set('institutionId')}>
+              <option value="">기관을 골라주세요</option>
+              {institutions.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.name}{i.domain ? ` (${i.domain})` : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {institutions.length === 0 && <p className="text-[11px] text-slate-400 -mt-2">등록된 기관이 없어요. 운영자에게 기관 등록을 요청해주세요.</p>}
+          <Field label="부서">
+            <input className={`${inputClass}`} value={form.department} onChange={set('department')} maxLength={100} placeholder="예: 학생지원팀 / 중앙도서관 분실물센터" />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="담당자 이름">
+              <input className={`${inputClass}`} value={form.manager} onChange={set('manager')} maxLength={50} />
+            </Field>
+            <Field label="업무 연락처">
+              <input className={`${inputClass}`} value={form.contact} onChange={set('contact')} maxLength={50} placeholder="041-000-0000" />
+            </Field>
+          </div>
+          <Field label="확인용 설명 (선택)" hint="운영자가 확인할 수 있게 재직 사실을 알 수 있는 내용을 적어주세요.">
+            <textarea rows={3} className={`${inputClass} resize-none`} value={form.note} onChange={set('note')} maxLength={500} />
+          </Field>
+          {error && <p className="text-xs text-rose-500 whitespace-pre-line">{error}</p>}
+          <Button type="submit" className="w-full" loading={submitting}>신청하기</Button>
+        </form>
+      )}
+    </Layout>
   );
 }

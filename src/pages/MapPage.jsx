@@ -1,146 +1,282 @@
-import React, { useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
-import L from 'leaflet';
+import { GraduationCap, Loader2, LocateFixed, MapPin, X } from 'lucide-react';
+import TopBar from '../components/TopBar';
 import BottomNav from '../components/BottomNavBar';
-import { 
-  Search, 
-  Navigation, 
-  Layers, 
-  Coffee,
-  Utensils,
-  Train,
-  GraduationCap,
-  ShoppingBag,
-  FerrisWheel
-} from 'lucide-react';
+import KakaoMap from '../components/KakaoMap';
+import { CATEGORIES, SCHOOL } from '../lib/constants';
+import { api } from '../lib/api';
+import PlaceSearch from '../components/PlaceSearch';
+import { getMyLocation } from '../lib/geo';
+import { timeAgo } from '../lib/format';
+import { toast } from '../lib/toast';
 
+const TYPE_TABS = [
+  { value: '', label: '전체' },
+  { value: 'FOUND', label: '습득물', dot: 'bg-blue-600' },
+  { value: 'LOST', label: '분실물', dot: 'bg-amber-500' },
+];
 
-import markerIcon from 'leaflet/dist/images/marker-icon.png';
-import markerShadow from 'leaflet/dist/images/marker-shadow.png';
-
-let DefaultIcon = L.icon({
-  iconUrl: markerIcon,
-  shadowUrl: markerShadow,
-  iconSize: [25, 41],
-  iconAnchor: [12, 41]
-});
-L.Marker.prototype.options.icon = DefaultIcon;
+function TypeBadge({ type }) {
+  return (
+    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded text-white ${type === 'FOUND' ? 'bg-blue-600' : 'bg-amber-500'}`}>
+      {type === 'FOUND' ? '습득물' : '분실물'}
+    </span>
+  );
+}
 
 export default function MapPage() {
   const navigate = useNavigate();
-  
-  // 중심 좌표 (서울 시청 기준)
-  const [position, setPosition] = useState([37.566826, 126.978656]);
-  const [markerPos, setMarkerPos] = useState(null);
+  const mapRef = useRef(null);
+  const [type, setType] = useState('');
+  const [category, setCategory] = useState('');
+  const [bounds, setBounds] = useState(null);
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [selected, setSelected] = useState(null);
+  const [me, setMe] = useState(null);
+  const [locating, setLocating] = useState(false);
 
-  const handleCurrentLocation = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const currentPos = [pos.coords.latitude, pos.coords.longitude];
-          setPosition(currentPos);
-          setMarkerPos(currentPos);
-        },
-        (error) => {
-          alert('위치 정보를 가져올 수 없습니다. GPS 권한을 확인해주세요.');
-          console.error(error);
-        },
-        { enableHighAccuracy: true }
-      );
-    } else {
+  // 지도 이동이 끝나면 화면 영역 안의 게시글을 다시 불러옴 (300ms 모아서)
+  const idleTimer = useRef(null);
+  const onIdle = useCallback((b) => {
+    clearTimeout(idleTimer.current);
+    idleTimer.current = setTimeout(() => setBounds(b), 300);
+  }, []);
+
+  useEffect(() => {
+    if (!bounds) return;
+    let alive = true;
+    setLoading(true);
+    api('/items/map', { query: { ...bounds, type, category } })
+      .then((d) => {
+        if (!alive) return;
+        setItems(d?.items ?? []);
+        setError('');
+      })
+      .catch((e) => alive && setError(e.message))
+      .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [bounds, type, category]);
+
+  const markers = useMemo(() => {
+    const list = items.map((it) => ({ id: it.id, lat: it.locationLat, lng: it.locationLng, kind: it.type, title: it.title }));
+    if (me) list.push({ id: 'me', lat: me.lat, lng: me.lng, kind: 'ME', title: '내 위치' });
+    return list;
+  }, [items, me]);
+
+  const onMarkerClick = useCallback(
+    (m) => {
+      if (m.id === 'me') return;
+      setSelected(items.find((it) => it.id === m.id) ?? null);
+    },
+    [items],
+  );
+
+  const focusItem = (it) => {
+    setSelected(it);
+    mapRef.current?.panTo({ lat: it.locationLat, lng: it.locationLng });
+  };
+
+  const goMyLocation = async () => {
+    setLocating(true);
+    try {
+      const p = await getMyLocation();
+      setMe(p);
+      mapRef.current?.panTo(p, 4);
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setLocating(false);
     }
   };
 
-  const categories = [
-    { name: '카페', icon: <Coffee className="w-3.5 h-3.5" /> },
-    { name: '식당', icon: <Utensils className="w-3.5 h-3.5" /> },
-    { name: '지하철역', icon: <Train className="w-3.5 h-3.5" /> },
-    { name: '학교/학원', icon: <GraduationCap className="w-3.5 h-3.5" /> },
-    { name: '쇼핑몰', icon: <ShoppingBag className="w-3.5 h-3.5" /> },
-    { name: '놀이공원', icon: <FerrisWheel className="w-3.5 h-3.5" /> },
-  ];
+  const statusText = error
+    ? error
+    : loading
+      ? '불러오는 중'
+      : bounds
+        ? `이 지역 게시글 ${items.length}개${items.length >= 200 ? ' (확대하면 더 보여요)' : ''}`
+        : '';
+
+  const searchBox = <PlaceSearch near={SCHOOL} placeholder="장소로 이동 (예: 중앙도서관)" onPick={(p) => mapRef.current?.panTo(p, 3)} />;
+
+  const typeButtons = TYPE_TABS.map((t) => (
+    <button
+      key={t.label}
+      type="button"
+      onClick={() => setType(t.value)}
+      className={`shrink-0 flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] font-medium border ${
+        type === t.value ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 hover:border-slate-400'
+      }`}
+    >
+      {t.dot && <span className={`w-2 h-2 rounded-full ${t.dot}`} />}
+      {t.label}
+    </button>
+  ));
+
+  const categoryButtons = CATEGORIES.map((c) => (
+    <button
+      key={c}
+      type="button"
+      onClick={() => setCategory((v) => (v === c ? '' : c))}
+      className={`shrink-0 h-8 px-3 rounded-md text-[13px] border ${
+        category === c ? 'bg-blue-600 text-white border-blue-600 font-medium' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
+      }`}
+    >
+      {c}
+    </button>
+  ));
 
   return (
-    <div className="relative w-full h-screen bg-slate-100 overflow-hidden flex flex-col">
-      
-      <div className="absolute inset-0 w-full h-full z-0">
-        <MapContainer 
-          center={position} 
-          zoom={15} 
-          style={{ width: '100%', height: '100%' }}
-          zoomControl={false}
-        >
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-          {markerPos && (
-            <Marker position={markerPos}>
-              <Popup>현재 선택된 위치입니다.</Popup>
-            </Marker>
-          )}
-        </MapContainer>
-      </div>
+    <div className="fixed inset-0 bg-white">
+      <TopBar />
 
-      <header className="absolute top-0 left-0 right-0 z-[1000] px-4 pt-4 pb-2 bg-gradient-to-b from-black/40 via-black/10 to-transparent pointer-events-none">
-        <div className="max-w-md mx-auto pointer-events-auto">
-          <div className="flex items-center bg-white/95 backdrop-blur-md rounded-2xl px-4 py-3 shadow-lg border border-slate-100">
-            <Search className="w-5 h-5 text-slate-400 mr-2" />
-            <input 
-              type="text" 
-              placeholder="분실물, 장소, 지하철역 검색..." 
-              className="w-full bg-transparent text-sm text-slate-800 placeholder-slate-400 focus:outline-none"
-            />
+      <div className="absolute top-14 inset-x-0 bottom-16 md:bottom-0 flex">
+        {/* 넓은 화면: 왼쪽 목록 */}
+        <aside className="hidden md:flex w-80 lg:w-96 shrink-0 flex-col border-r border-slate-200 bg-white">
+          <div className="p-4 space-y-3 border-b border-slate-200">
+            <div>
+              <h1 className="text-base font-bold text-slate-900">지도에서 찾기</h1>
+              <p className="text-xs text-slate-500 mt-0.5">지도를 움직이면 보이는 지역의 게시글이 아래에 나와요.</p>
+            </div>
+            {searchBox}
+            <div>
+              <p className="text-[11px] font-semibold text-slate-400 mb-1">종류</p>
+              <div className="flex gap-1.5">{typeButtons}</div>
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold text-slate-400 mb-1">분류</p>
+              <div className="flex flex-wrap gap-1.5">{categoryButtons}</div>
+            </div>
           </div>
+          <p className={`px-4 py-2 text-xs border-b border-slate-100 flex items-center gap-1 ${error ? 'text-rose-600' : 'text-slate-500'}`}>
+            {loading && <Loader2 className="w-3 h-3 animate-spin" />}
+            {statusText}
+          </p>
+          <ul className="flex-1 overflow-y-auto divide-y divide-slate-100">
+            {!loading && items.length === 0 && bounds && (
+              <li className="p-6 text-center">
+                <p className="text-sm text-slate-500">이 지역에는 게시글이 없어요.</p>
+                <p className="text-xs text-slate-400 mt-1">지도를 옮기거나 축소해 보세요.</p>
+                <div className="mt-4 flex justify-center gap-2">
+                  <button type="button" onClick={() => mapRef.current?.panTo(SCHOOL, 4)} className="h-8 px-3 rounded-md border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50">학교로 이동</button>
+                  <button type="button" onClick={() => navigate('/write?type=FOUND')} className="h-8 px-3 rounded-md bg-blue-600 text-xs font-semibold text-white hover:bg-blue-700">여기서 주웠어요</button>
+                </div>
+              </li>
+            )}
+            {items.map((it) => (
+              <li key={it.id}>
+                <button
+                  type="button"
+                  onClick={() => focusItem(it)}
+                  className={`w-full text-left px-4 py-3 hover:bg-slate-50 ${selected?.id === it.id ? 'bg-blue-50/60' : ''}`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <TypeBadge type={it.type} />
+                    <span className="text-[11px] text-slate-400">{it.category} · {timeAgo(it.createdAt)}</span>
+                  </div>
+                  <p className="text-sm font-semibold text-slate-900 mt-1 truncate">{it.title}</p>
+                  {it.type === 'FOUND' && (
+                    <p className="text-xs text-slate-500 mt-0.5 truncate">{it.storageLocation ?? '보관 장소 비공개'}</p>
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </aside>
+
+        {/* 지도 */}
+        <div className="relative flex-1">
+          <KakaoMap
+            ref={mapRef}
+            className="absolute inset-0"
+            center={SCHOOL}
+            level={4}
+            markers={markers}
+            onMarkerClick={onMarkerClick}
+            onIdle={onIdle}
+            onPick={() => setSelected(null)}
+          />
+
+          {/* 휴대폰: 지도 위 검색/필터 */}
+          <div className="md:hidden absolute top-0 inset-x-0 z-10 p-3 space-y-2">
+            {searchBox}
+            <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
+              {typeButtons}
+              <span className="shrink-0 w-px bg-slate-300 mx-0.5" />
+              {categoryButtons}
+            </div>
+            {statusText && (
+              <div className="flex justify-center">
+                <span className={`text-[11px] font-medium px-2.5 py-1 rounded bg-white/95 shadow-sm ${error ? 'text-rose-600' : 'text-slate-500'}`}>{statusText}</span>
+              </div>
+            )}
+          </div>
+
+          {/* 핀 색 안내 */}
+          {!selected && (
+            <div className="absolute left-3 bottom-4 z-10 bg-white/95 rounded-md shadow border border-slate-200 px-3 py-2 flex gap-3 text-[11px] text-slate-600">
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#2563eb]" />습득물</span>
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#f59e0b]" />분실물</span>
+              {me && <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#0ea5e9]" />내 위치</span>}
+              <span className="hidden sm:inline text-slate-400">· 핀을 누르면 정보가 보여요</span>
+            </div>
+          )}
+
+          {/* 지도 도구: 넓은 화면은 오른쪽 위, 휴대폰은 오른쪽 아래 */}
+          <div
+            className={`absolute right-3 z-10 flex flex-col items-end gap-2 md:top-3 md:bottom-auto ${selected ? 'bottom-44' : 'bottom-12'}`}
+          >
+            <div className="flex bg-white rounded-lg shadow-md border border-slate-200 overflow-hidden text-[13px] font-semibold text-slate-700">
+              <button type="button" onClick={() => mapRef.current?.panTo(SCHOOL, 4)} className="h-9 px-3 flex items-center gap-1.5 hover:bg-slate-50" title="나사렛대학교로 이동">
+                <GraduationCap className="w-4 h-4 text-blue-600" />
+                학교
+              </button>
+              <span className="w-px bg-slate-200" />
+              <button type="button" onClick={goMyLocation} disabled={locating} className="h-9 px-3 flex items-center gap-1.5 hover:bg-slate-50 disabled:text-slate-400" title="내 위치로 이동">
+                {locating ? <Loader2 className="w-4 h-4 animate-spin text-sky-600" /> : <LocateFixed className="w-4 h-4 text-sky-600" />}
+                {locating ? '찾는 중' : '내 위치'}
+              </button>
+            </div>
+            <div className="flex flex-col bg-white rounded-lg shadow-md border border-slate-200 overflow-hidden text-slate-700">
+              <button type="button" onClick={() => mapRef.current?.zoomBy(-1)} className="w-9 h-9 flex items-center justify-center text-lg font-medium hover:bg-slate-50" aria-label="확대">+</button>
+              <span className="h-px bg-slate-200" />
+              <button type="button" onClick={() => mapRef.current?.zoomBy(1)} className="w-9 h-9 flex items-center justify-center text-lg font-medium hover:bg-slate-50" aria-label="축소">−</button>
+            </div>
+          </div>
+
+          {/* 선택한 게시글 */}
+          {selected && (
+            <div className="absolute bottom-4 left-3 right-3 md:right-auto md:w-80 z-20 bg-white rounded-lg shadow-lg border border-slate-200 p-4">
+              <div className="flex items-start gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <TypeBadge type={selected.type} />
+                    <span className="text-[11px] text-slate-400">{selected.category} · {timeAgo(selected.createdAt)}</span>
+                  </div>
+                  <p className="text-sm font-bold text-slate-900 mt-1.5 truncate">{selected.title}</p>
+                  <p className="text-xs text-slate-500 mt-1 flex items-center gap-1 truncate">
+                    <MapPin className="w-3 h-3 shrink-0" />
+                    {selected.type === 'FOUND' ? selected.storageLocation ?? '보관 장소는 로그인 후 볼 수 있어요' : '이 근처에서 잃어버렸어요'}
+                  </p>
+                </div>
+                <button type="button" onClick={() => setSelected(null)} className="p-1 -m-1 text-slate-400" aria-label="닫기">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <button type="button" onClick={() => navigate(`/feed/${selected.id}`)} className="w-full mt-3 h-9 rounded-md bg-slate-900 text-white text-sm font-semibold">
+                자세히 보기
+              </button>
+            </div>
+          )}
         </div>
-
-
-        <div 
-          className="max-w-md mx-auto pointer-events-auto flex gap-2 mt-2 overflow-x-auto py-1 px-1"
-          style={{
-            scrollbarWidth: 'none',
-            msOverflowStyle: 'none',
-          }}
-        >
-          <style>{`
-            div::-webkit-scrollbar {
-              display: none; /* 크롬, 사파리 스크롤바 숨김 */
-            }
-          `}</style>
-
-          {categories.map((cat, idx) => (
-            <button 
-              key={idx}
-              className="whitespace-nowrap px-3.5 py-1.5 bg-white/95 backdrop-blur-md text-xs font-medium text-slate-700 rounded-full shadow-md border border-slate-100 hover:bg-violet-50 hover:text-violet-600 transition flex items-center gap-1.5"
-            >
-              {cat.icon}
-              <span>{cat.name}</span>
-            </button>
-          ))}
-        </div>
-      </header>
-
-      <div className="absolute right-4 bottom-28 flex flex-col gap-3 z-[1000]">
-        <button 
-          className="w-11 h-11 bg-white rounded-2xl flex items-center justify-center shadow-md border border-slate-100 text-slate-700 hover:bg-slate-50 transition active:scale-95"
-          title="지도 레이어"
-        >
-          <Layers className="w-5 h-5 text-slate-600" />
-        </button>
-        <button 
-          onClick={handleCurrentLocation}
-          className="w-11 h-11 bg-white rounded-2xl flex items-center justify-center shadow-md border border-slate-100 text-violet-600 hover:bg-violet-50 transition active:scale-95"
-          title="현재 위치"
-        >
-          <Navigation className="w-5 h-5 fill-violet-100" />
-        </button>
       </div>
 
-      <div className="relative z-[1000] mt-auto">
-        <BottomNav />
-      </div>
-
+      <BottomNav />
     </div>
   );
 }
