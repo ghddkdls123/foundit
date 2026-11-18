@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import { isLoggedIn } from './lib/api';
+import useSession from './lib/useSession';
 import Home from './pages/Home';
 import FeedPage from './pages/Feedpage';
 import FeedDetail from './pages/FeedDetail';
@@ -23,7 +23,8 @@ import Toaster from './components/Toaster';
 /** 로그인이 필요한 화면: 로그인 후 원래 화면으로 돌아옵니다 */
 function RequireAuth({ children }) {
   const location = useLocation();
-  if (!isLoggedIn()) {
+  const session = useSession();
+  if (!session) {
     return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
   }
   return children;

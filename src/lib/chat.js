@@ -14,6 +14,9 @@ let usedToken = '';
 let myUserId = null;
 
 const messageListeners = new Set();
+const readListeners = new Set();
+const updatedListeners = new Set();
+const deletedListeners = new Set();
 const reconnectListeners = new Set();
 const unreadListeners = new Set();
 let unread = 0;
@@ -44,10 +47,23 @@ export function getMyUserId() {
   return myUserId;
 }
 
-/** 새 메시지 받기. 반환값을 호출하면 구독 해제 */
+/** 메시지 받기. 반환값을 호출하면 구독 해제 */
 export function onChatMessage(fn) {
   messageListeners.add(fn);
   return () => messageListeners.delete(fn);
+}
+
+export function onConversationRead(fn) {
+  readListeners.add(fn);
+  return () => readListeners.delete(fn);
+}
+export function onMessageUpdated(fn) {
+  updatedListeners.add(fn);
+  return () => updatedListeners.delete(fn);
+}
+export function onMessageDeleted(fn) {
+  deletedListeners.add(fn);
+  return () => deletedListeners.delete(fn);
 }
 
 /** 재연결될 때마다 (빠진 메시지 다시 받기용) */
@@ -94,6 +110,19 @@ function connect() {
     // 내 메시지(다른 탭에서 보낸 것 포함)나 지금 보고 있는 방이 아니면 배지 +1
     if (!mine && !viewing) setUnread(unread + 1);
     messageListeners.forEach((fn) => fn(m));
+  });
+
+  socket.on('conversation:read', (event) => {
+    if (!event) return;
+    readListeners.forEach((fn) => fn(event));
+  });
+  socket.on('message:updated', (event) => {
+    if (!event) return;
+    updatedListeners.forEach((fn) => fn(event));
+  });
+  socket.on('message:deleted', (event) => {
+    if (!event) return;
+    deletedListeners.forEach((fn) => fn(event));
   });
 
   socket.on('auth_error', () => {

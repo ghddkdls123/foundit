@@ -4,7 +4,7 @@ import { ImageOff, MessageCircle } from 'lucide-react';
 import Layout from '../components/Layout';
 import { Empty, ErrorBox, Spinner } from '../components/ui';
 import { api } from '../lib/api';
-import { onChatMessage, onChatReconnect, refreshUnread } from '../lib/chat';
+import { onChatMessage, onChatReconnect, onConversationRead, onMessageDeleted, onMessageUpdated, refreshUnread } from '../lib/chat';
 import { STATUS_LABEL, TYPE_LABEL } from '../lib/constants';
 import { timeAgo } from '../lib/format';
 
@@ -25,9 +25,15 @@ export default function ChatList() {
     // 새 메시지가 오면 목록(마지막 메시지, 안 읽은 수, 순서)을 다시 불러옴
     const offMsg = onChatMessage(() => load());
     const offRe = onChatReconnect(() => load());
+    const offRead = onConversationRead(() => { load(); refreshUnread(); });
+    const offUpdated = onMessageUpdated(() => load());
+    const offDeleted = onMessageDeleted(() => load());
     return () => {
       offMsg();
       offRe();
+      offRead();
+      offUpdated();
+      offDeleted();
     };
   }, [load]);
 
