@@ -67,7 +67,12 @@ export default function ChatRoom() {
   useEffect(() => () => clearTimeout(holdTimerRef.current), []);
 
   const myId = () => getMyUserId() ?? getSession()?.userId;
-  const isMine = (m) => myId() != null && String(m.senderId) === String(myId());
+  // API의 isMine 판정을 우선 사용, 이 값이 없는 소켓 메시지는 senderId로 구분
+  const isMine = (m) => {
+    if (typeof m?.isMine === 'boolean') return m.isMine;
+    const userId = myId();
+    return userId != null && String(m?.senderId) === String(userId);
+  };
 
   const markRead = useCallback(() => {
     api(`/conversations/${id}/read`, { method: 'POST' })
