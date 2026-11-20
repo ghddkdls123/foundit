@@ -7,7 +7,6 @@ import ItemCard from '../components/ItemCard';
 import { NoSimilarNotice, SimilarityHelp } from '../components/SimilarityHelp';
 import { Button, ErrorBox, Field, Spinner, inputClass } from '../components/ui';
 import { api } from '../lib/api';
-import { isLocallyReturned, LOCAL_ITEM_STATUS_EVENT } from '../lib/localItemStatus';
 import { CATEGORIES, MIN_SIMILARITY, REGIONS, REGION_LABEL, STATUS_LABEL } from '../lib/constants';
 import { fullDate } from '../lib/format';
 import useSession from '../lib/useSession';
@@ -25,6 +24,7 @@ export default function FeedDetail() {
   const session = useSession();
 
   const [item, setItem] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
@@ -48,7 +48,7 @@ export default function FeedDetail() {
     setLoading(true);
     setError('');
     api(`/items/${id}`)
-      .then((data) => alive && setItem(isLocallyReturned(data?.id) ? { ...data, status: 'RETURNED' } : data))
+      .then((data) => alive && setItem(data))
       .catch((e) => alive && setError(e.status === 404 ? '게시글을 찾을 수 없어요. 삭제되었을 수 있어요.' : e.message))
       .finally(() => alive && setLoading(false));
     // 사진 분석(임베딩)이 아직이면 4초마다 다시 확인 (최대 약 40초)
@@ -71,13 +71,16 @@ export default function FeedDetail() {
   }, [id, session?.userId]);
 
   useEffect(() => {
-    const updateLocalStatus = (event) => {
-      if (String(event.detail?.itemId) !== String(id) || event.detail?.status !== 'RETURNED') return;
-      setItem((current) => current ? { ...current, status: 'RETURNED' } : current);
-    };
-    window.addEventListener(LOCAL_ITEM_STATUS_EVENT, updateLocalStatus);
-    return () => window.removeEventListener(LOCAL_ITEM_STATUS_EVENT, updateLocalStatus);
-  }, [id]);
+    if (!session?.userId) {
+      setCurrentUser(null);
+      return undefined;
+    }
+    let alive = true;
+    api('/users/me')
+      .then((data) => alive && setCurrentUser(data))
+      .catch(() => alive && setCurrentUser(null));
+    return () => { alive = false; };
+  }, [session?.userId]);
 
   useEffect(() => {
     if (!session?.userId) {
@@ -120,6 +123,12 @@ export default function FeedDetail() {
 
   const isFound = item.type === 'FOUND';
   const placeValue = isFound ? item.storageLocation : item.lostLocation;
+  const itemInstitutionId = item.institution?.id ?? item.institutionId;
+  const userInstitutionId = currentUser?.institution?.id ?? currentUser?.institutionId;
+  const canManageStatus = item.isMine === true || (
+    currentUser?.role === 'ORG_ADMIN' && itemInstitutionId != null && userInstitutionId != null &&
+    String(itemInstitutionId) === String(userInstitutionId)
+  );
 
   const startEdit = () => {
     setForm({
@@ -186,23 +195,23 @@ export default function FeedDetail() {
     }
   };
 
-  const menu = item.isMine && !editing && (
+  const menu = canManageStatus && !editing && (
     <div className="relative" ref={menuRef}>
       <button type="button" onClick={() => setMenuOpen((v) => !v)} className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100" aria-label="메뉴">
         <MoreVertical className="w-5 h-5" />
       </button>
       {menuOpen && (
         <div className="absolute right-0 mt-1 w-44 bg-white rounded-md shadow-lg border border-slate-100 py-1 z-50 text-xs font-semibold">
-          <button type="button" onClick={startEdit} className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-slate-50 text-slate-700">
+          {item.isMine && <button type="button" onClick={startEdit} className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-slate-50 text-slate-700">
             <Edit3 className="w-3.5 h-3.5 text-blue-600" /> 수정하기
-          </button>
-          <button type="button" onClick={toggleStatus} className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-slate-50 text-slate-700">
+          </button>}
+          {canManageStatus && <button type="button" onClick={toggleStatus} className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-slate-50 text-slate-700">
             {item.status === 'OPEN' ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> : <RotateCcw className="w-3.5 h-3.5 text-slate-500" />}
             {item.status === 'OPEN' ? '반환 완료로 변경' : '진행 중으로 변경'}
-          </button>
-          <button type="button" onClick={remove} className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-rose-50 text-rose-600 border-t border-slate-50">
+          </button>}
+          {item.isMine && <button type="button" onClick={remove} className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-rose-50 text-rose-600 border-t border-slate-50">
             <Trash2 className="w-3.5 h-3.5" /> 삭제하기
-          </button>
+          </button>}
         </div>
       )}
     </div>

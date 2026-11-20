@@ -1,7 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { Building2, Lock, MapPin } from 'lucide-react';
 import { timeAgo } from '../lib/format';
-import { isLocallyReturned } from '../lib/localItemStatus';
 import { REGION_LABEL, toOurCategory } from '../lib/constants';
 
 /** 서버 응답 3가지(피드 카드, 우리 게시글, 공공 습득물)를 한 모양으로 */
@@ -37,7 +36,7 @@ export function normalizeItem(raw) {
     img: raw.thumbnailUrl ?? '',
     institution: typeof raw.institution === 'string' ? raw.institution : raw.institution?.name ?? '',
     region: raw.region ?? '',
-    status: isLocallyReturned(raw.id) ? 'RETURNED' : raw.status ?? 'OPEN',
+    status: raw.status ?? 'OPEN',
     similarity: raw.similarity,
   };
 }
