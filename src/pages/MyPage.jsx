@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Building2, Check, ChevronRight, ExternalLink, KeyRound, LogOut, Mail, MessageCircle, PencilLine, ShieldCheck, UserX,
+  Building2, Check, ChevronLeft, ChevronRight, ExternalLink, KeyRound, LogOut, Mail, MessageCircle, PencilLine, ShieldCheck, UserX,
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import ItemCard from '../components/ItemCard';
@@ -17,6 +17,13 @@ import { POLICE_LOST_URL } from '../lib/constants';
 import { toast } from '../lib/toast';
 
 const ROLE_LABEL = { USER: '일반 회원', ORG_ADMIN: '기관 관리자', SUPER_ADMIN: '운영자' };
+const NOTES_PAGE_SIZE = 20;
+
+function formatNoteDate(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+}
 
 function Row({ Icon, title, desc, right, onClick, danger }) {
   return (
@@ -204,9 +211,12 @@ export default function MyPage() {
   const unread = useUnread();
   const [me, setMe] = useState(null);
   const [meError, setMeError] = useState('');
-  const [tab, setTab] = useState('mine'); // dashboard | mine | org
+  const [tab, setTab] = useState('mine'); // dashboard | mine | org | notes
   const [typeFilter, setTypeFilter] = useState('');
   const [list, setList] = useState({ loading: true, items: [], error: '' });
+  const [notesPage, setNotesPage] = useState(1);
+  const [notesReload, setNotesReload] = useState(0);
+  const [notesList, setNotesList] = useState({ loading: false, items: [], total: 0, error: '' });
   const [modal, setModal] = useState(''); // name | password | withdraw
   const [cooldown, startCooldown] = useCooldown();
 
@@ -233,7 +243,7 @@ export default function MyPage() {
   const isUser = me?.role === 'USER';
 
   useEffect(() => {
-    if (tab === 'dashboard') return undefined;
+    if (tab === 'dashboard' || tab === 'notes') return undefined;
     let alive = true;
     setList((l) => ({ ...l, loading: true, error: '' }));
     api(tab === 'org' ? '/items/org' : '/items/mine', { query: { type: typeFilter, limit: 30 } })
@@ -243,6 +253,16 @@ export default function MyPage() {
       alive = false;
     };
   }, [tab, typeFilter]);
+
+  useEffect(() => {
+    if (tab !== 'notes') return undefined;
+    let alive = true;
+    setNotesList((current) => ({ ...current, loading: true, error: '' }));
+    api('/notes/me', { query: { page: notesPage, limit: NOTES_PAGE_SIZE } })
+      .then((data) => alive && setNotesList({ loading: false, items: data?.items ?? [], total: data?.total ?? 0, error: '' }))
+      .catch((error) => alive && setNotesList((current) => ({ ...current, loading: false, error: error.message })));
+    return () => { alive = false; };
+  }, [tab, notesPage, notesReload]);
 
   if (!session) return null;
 
@@ -377,20 +397,67 @@ export default function MyPage() {
 
         {/* 오른쪽: 내 글 */}
         <section className="min-w-0">
-          {isOrgAdmin && (
+          {me && (
             <Segmented
               className="mb-4"
               value={tab}
               onChange={setTab}
-              options={[
+              options={isOrgAdmin ? [
                 { value: 'dashboard', label: '기관 대시보드' },
                 { value: 'mine', label: '내가 쓴 글' },
                 { value: 'org', label: '우리 기관 전체' },
+                { value: 'notes', label: '내 메모' },
+              ] : [
+                { value: 'mine', label: '내가 쓴 글' },
+                { value: 'notes', label: '내 메모' },
               ]}
             />
           )}
           {isOrgAdmin && tab === 'dashboard' ? (
             <AdminDashboard institution={me?.institution} />
+          ) : tab === 'notes' ? (
+            <section>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h2 className="text-lg font-bold text-slate-900">내 메모</h2>
+                <span className="text-xs text-slate-400">{notesList.total.toLocaleString()}개</span>
+              </div>
+              {notesList.loading ? <Spinner label="메모를 불러오는 중..." /> : notesList.error ? (
+                <ErrorBox message={notesList.error} onRetry={() => setNotesReload((value) => value + 1)} />
+              ) : notesList.items.length === 0 ? (
+                <Empty title="작성한 메모가 없어요" desc="게시글에서 메모를 작성하면 여기에 모아 보여드려요." />
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    {notesList.items.map((note) => {
+                      const target = note.target ?? {};
+                      const isPublic = target.source === 'public';
+                      const destination = isPublic ? `/public/${target.id}` : `/feed/${target.id}`;
+                      return <button key={`${target.source}-${target.id}-${note.id}`} type="button" onClick={() => navigate(destination)} className="flex w-full items-start gap-3 rounded-lg border border-slate-200 bg-white p-3 text-left transition hover:border-slate-300 hover:bg-slate-50">
+                        <span className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md bg-slate-100 text-[10px] font-semibold text-slate-400">
+                          {target.thumbnailUrl ? <img src={target.thumbnailUrl} alt="" className="h-full w-full object-cover" loading="lazy" /> : (isPublic ? '경찰청' : '사진 없음')}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
+                            <span className={`rounded px-1.5 py-0.5 font-semibold ${isPublic ? 'bg-slate-100 text-slate-600' : 'bg-blue-50 text-blue-700'}`}>{isPublic ? '경찰청 유실물' : 'Foundit 게시글'}</span>
+                            <span>{note.scope === 'INSTITUTION' ? '기관 메모' : '내 메모'}</span>
+                            {target.type && <span>{target.type === 'LOST' ? '분실물' : '습득물'}</span>}
+                            {note.createdAt && <span>{formatNoteDate(note.createdAt)}</span>}
+                          </span>
+                          <span className="mt-1 block truncate text-sm font-bold text-slate-800">{target.title || '제목 없는 게시글'}</span>
+                          {target.place && <span className="mt-0.5 block truncate text-xs text-slate-500">{target.place}</span>}
+                          <span className="mt-1 block max-h-10 overflow-hidden whitespace-pre-wrap break-words text-xs leading-relaxed text-slate-600">{note.content}</span>
+                        </span>
+                      </button>;
+                    })}
+                  </div>
+                  {notesList.total > NOTES_PAGE_SIZE && <div className="mt-4 flex items-center justify-center gap-3">
+                    <button type="button" aria-label="이전 메모 페이지" onClick={() => setNotesPage((page) => Math.max(1, page - 1))} disabled={notesPage <= 1} className="flex h-8 w-8 items-center justify-center rounded border border-slate-200 text-slate-600 disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button>
+                    <span className="text-xs text-slate-500">{notesPage} / {Math.ceil(notesList.total / NOTES_PAGE_SIZE)}</span>
+                    <button type="button" aria-label="다음 메모 페이지" onClick={() => setNotesPage((page) => Math.min(Math.ceil(notesList.total / NOTES_PAGE_SIZE), page + 1))} disabled={notesPage >= Math.ceil(notesList.total / NOTES_PAGE_SIZE)} className="flex h-8 w-8 items-center justify-center rounded border border-slate-200 text-slate-600 disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button>
+                  </div>}
+                </>
+              )}
+            </section>
           ) : (
           <>
           <div className="flex items-center justify-between mb-3">

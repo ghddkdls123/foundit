@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Building2, CalendarDays, ImageOff, MapPin, Phone, ExternalLink } from 'lucide-react';
 import Layout from '../components/Layout';
+import ItemNotesButton from '../components/ItemNotesButton';
 import { ErrorBox, Spinner } from '../components/ui';
 import { api } from '../lib/api';
 import { POLICE_LOST_URL, REGION_LABEL, toOurCategory } from '../lib/constants';
@@ -78,6 +79,13 @@ export default function PublicDetail() {
           </div>
         </div>
       </div>
+      <section className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-6">
+        <div>
+          <h2 className="text-lg font-bold text-slate-900">메모</h2>
+          <p className="mt-1 text-xs text-slate-500">내 메모는 나만 확인할 수 있어요.</p>
+        </div>
+        <ItemNotesButton item={{ id: item.id, title: item.name, source: 'public' }} label="메모 확인 / 작성" />
+      </section>
     </Layout>
   );
 }

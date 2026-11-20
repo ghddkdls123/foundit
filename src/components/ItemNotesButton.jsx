@@ -5,7 +5,8 @@ import { fullDate } from '../lib/format';
 import { Button, Empty, ErrorBox, Spinner } from './ui';
 import { toast } from '../lib/toast';
 
-export default function ItemNotesButton({ item, className = '', compact = false }) {
+export default function ItemNotesButton({ item, className = '', compact = false, label = '' }) {
+  const endpoint = item.source === 'public' ? `/public-items/${item.id}/notes` : `/items/${item.id}/notes`;
   const buttonRef = useRef(null);
   const [open, setOpen] = useState(false);
   const [notes, setNotes] = useState({ loading: false, error: '', private: [], institution: [], canWriteInstitution: false });
@@ -21,7 +22,7 @@ export default function ItemNotesButton({ item, className = '', compact = false 
     let alive = true;
     let observer;
     const checkForNotes = () => {
-      api(`/items/${item.id}/notes`)
+      api(endpoint)
         .then((data) => alive && setHasNotes(
           (Array.isArray(data?.private) && data.private.length > 0) ||
           (Array.isArray(data?.institution) && data.institution.length > 0),
@@ -44,13 +45,13 @@ export default function ItemNotesButton({ item, className = '', compact = false 
       alive = false;
       observer?.disconnect();
     };
-  }, [item.id]);
+  }, [endpoint, item.id]);
 
   useEffect(() => {
     if (!open) return undefined;
     let alive = true;
     setNotes({ loading: true, error: '', private: [], institution: [], canWriteInstitution: false });
-    api(`/items/${item.id}/notes`)
+    api(endpoint)
       .then((data) => {
         if (!alive) return;
         const canWriteInstitution = data?.canWriteInstitution === true;
@@ -66,7 +67,7 @@ export default function ItemNotesButton({ item, className = '', compact = false 
       })
       .catch((error) => alive && setNotes((current) => ({ ...current, loading: false, error: error.message })));
     return () => { alive = false; };
-  }, [open, item.id, reload]);
+  }, [open, endpoint, item.id, reload]);
 
   const entries = scope === 'INSTITUTION' ? notes.institution : notes.private;
 
@@ -77,10 +78,11 @@ export default function ItemNotesButton({ item, className = '', compact = false 
     setSaving(true);
     try {
       const targetScope = editingNote?.scope || scope;
-      await api(`/items/${item.id}/notes`, { method: 'POST', body: { content, scope: targetScope } });
+      const body = item.source === 'public' ? { content } : { content, scope: targetScope };
+      await api(endpoint, { method: 'POST', body });
       if (editingNote) {
         try {
-          await api(`/items/${item.id}/notes/${editingNote.id}`, { method: 'DELETE' });
+          await api(`${endpoint}/${editingNote.id}`, { method: 'DELETE' });
         } catch {
           setNoteText('');
           setEditingNote(null);
@@ -104,7 +106,7 @@ export default function ItemNotesButton({ item, className = '', compact = false 
     if (note.isMine !== true || deletingId != null) return;
     setDeletingId(note.id);
     try {
-      await api(`/items/${item.id}/notes/${note.id}`, { method: 'DELETE' });
+      await api(`${endpoint}/${note.id}`, { method: 'DELETE' });
       if (String(editingNote?.id) === String(note.id)) {
         setEditingNote(null);
         setNoteText('');
@@ -119,8 +121,9 @@ export default function ItemNotesButton({ item, className = '', compact = false 
   };
 
   return <>
-    <button ref={buttonRef} type="button" onClick={() => { setEditingNote(null); setNoteText(''); setScope('PRIVATE'); setOpen(true); }} aria-label={`${item.title || '게시글'} 메모 보기`} title="게시글 메모 보기" className={`${compact ? 'h-8 w-8' : 'mt-2 h-9 w-9'} inline-flex shrink-0 items-center justify-center rounded-md border transition ${hasNotes ? 'border-blue-200 bg-blue-50/60 text-blue-600 hover:border-blue-300 hover:bg-blue-50' : 'border-slate-200 bg-white text-slate-500 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600'} ${className}`}>
+    <button ref={buttonRef} type="button" onClick={() => { setEditingNote(null); setNoteText(''); setScope('PRIVATE'); setOpen(true); }} aria-label={`${item.title || '게시글'} 메모 보기`} title="게시글 메모 보기" className={`${compact ? 'h-8 w-8' : 'mt-2 h-9 w-9'} inline-flex shrink-0 items-center justify-center rounded-md border transition ${hasNotes ? 'border-blue-200 bg-blue-50/60 text-blue-600 hover:border-blue-300 hover:bg-blue-50' : 'border-slate-200 bg-white text-slate-500 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600'} ${label ? 'h-auto w-auto gap-2 px-3 py-2 text-sm' : ''} ${className}`}>
       <MessageSquareText className="h-4 w-4" />
+      {label && <span>{label}</span>}
     </button>
 
     {open && <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/40 p-0 sm:items-center sm:p-4" onClick={() => setOpen(false)}>

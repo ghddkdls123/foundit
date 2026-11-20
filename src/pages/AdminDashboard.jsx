@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Building2, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Package, RefreshCw, Search, TrendingUp } from 'lucide-react';
 import { api } from '../lib/api';
@@ -32,6 +32,8 @@ export default function AdminDashboard({ institution }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [reload, setReload] = useState(0);
   const [busyId, setBusyId] = useState(null);
+  const [pageSizeOpen, setPageSizeOpen] = useState(false);
+  const pageSizeRef = useRef(null);
 
   useEffect(() => {
     let alive = true;
@@ -48,6 +50,14 @@ export default function AdminDashboard({ institution }) {
       .finally(() => alive && setLoading(false));
     return () => { alive = false; };
   }, [reload]);
+
+  useEffect(() => {
+    const closeOnOutsideClick = (event) => {
+      if (!pageSizeRef.current?.contains(event.target)) setPageSizeOpen(false);
+    };
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    return () => document.removeEventListener('mousedown', closeOnOutsideClick);
+  }, []);
 
   const filteredItems = useMemo(() => items.filter((item) => {
     const query = searchTerm.trim().toLocaleLowerCase();
@@ -116,9 +126,16 @@ export default function AdminDashboard({ institution }) {
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <span aria-hidden="true" className="hidden h-8 border-l border-slate-200 lg:block" />
-                <select aria-label="페이지당 표시 개수" value={itemsPerPage} onChange={(e) => setItemsPerPage(Number(e.target.value))} className="h-9 rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-700">
-                  {PAGE_SIZES.map((size) => <option key={size} value={size}>{size}개씩 보기</option>)}
-                </select>
+                <div className="relative w-[104px] shrink-0" ref={pageSizeRef}>
+                  <button type="button" aria-label="페이지당 표시 개수" aria-expanded={pageSizeOpen} onClick={() => setPageSizeOpen((open) => !open)} className={`flex h-9 w-full items-center rounded-lg border bg-white px-2.5 text-left text-xs text-slate-700 transition ${pageSizeOpen ? 'border-blue-300 ring-2 ring-blue-100' : 'border-slate-200 hover:border-slate-300'}`}>
+                    <span>{itemsPerPage}개씩 보기</span>
+                  </button>
+                  {pageSizeOpen && <div role="listbox" aria-label="페이지당 표시 개수 선택" className="absolute left-0 right-0 top-full z-30 mt-1 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                    {PAGE_SIZES.map((size) => <button key={size} type="button" role="option" aria-selected={itemsPerPage === size} onClick={() => { setItemsPerPage(size); setPageSizeOpen(false); }} className={`flex w-full items-center rounded-md px-3 py-2 text-left text-sm hover:bg-slate-50 ${itemsPerPage === size ? 'font-semibold text-blue-700' : 'text-slate-700'}`}>
+                      {size}개씩 보기
+                    </button>)}
+                  </div>}
+                </div>
                 <label className="relative min-w-[190px] flex-1 sm:flex-none">
                   <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="물품명, 분류, 보관 위치 검색" className="h-9 w-full rounded-md border border-slate-300 bg-white pl-9 pr-3 text-xs outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 sm:w-64" />
