@@ -4,7 +4,7 @@ import { Building2, CalendarDays, ImageOff, MapPin, Phone, ExternalLink } from '
 import Layout from '../components/Layout';
 import { ErrorBox, Spinner } from '../components/ui';
 import { api } from '../lib/api';
-import { POLICE_LOST_URL, toOurCategory } from '../lib/constants';
+import { POLICE_LOST_URL, REGION_LABEL, toOurCategory } from '../lib/constants';
 
 export default function PublicDetail() {
   const { id } = useParams();
@@ -49,7 +49,7 @@ export default function PublicDetail() {
           <div className="flex flex-wrap gap-1.5">
             <span className="text-[11px] font-bold px-1.5 py-0.5 rounded bg-slate-800 text-white">경찰청 유실물</span>
             <span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{toOurCategory(item.categoryMain)}</span>
-            {item.region && <span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{item.region}</span>}
+            {item.region && <span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{REGION_LABEL[item.region] || item.region}</span>}
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 mt-2">{item.name}</h1>
 

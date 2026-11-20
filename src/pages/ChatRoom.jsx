@@ -353,10 +353,12 @@ export default function ChatRoom() {
                   }`}
                 >
                   {m.deleted ? '삭제된 메시지입니다' : m.content}
+                  {m.edited && !m.deleted && (
+                    <span className={`mt-1 block text-right text-[10px] leading-none ${mine ? 'text-white/70' : 'text-slate-400'}`}>수정됨</span>
+                  )}
                 </p>}
-                <span className="flex flex-col items-center text-[10px] text-slate-400 shrink-0">
+                <span className="flex shrink-0 flex-col items-end text-right text-[10px] text-slate-400">
                   {mine && m.read === false && !m.deleted && <span className="font-bold text-amber-500">1</span>}
-                  {m.edited && !m.deleted && <span>수정됨</span>}
                   {timeLabel(m.createdAt)}
                 </span>
               </div>

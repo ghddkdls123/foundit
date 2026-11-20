@@ -1,5 +1,6 @@
-import { Loader2 } from 'lucide-react';
-import { CATEGORIES } from '../lib/constants';
+import { useState } from 'react';
+import { Check, ChevronDown, Loader2 } from 'lucide-react';
+import { CATEGORIES, FEED_REGIONS, REGIONS } from '../lib/constants';
 
 export function CategoryChips({ value, onChange, withAll = true, className = '' }) {
   const list = withAll ? ['전체', ...CATEGORIES] : CATEGORIES;
@@ -22,6 +23,80 @@ export function CategoryChips({ value, onChange, withAll = true, className = '' 
         );
       })}
     </div>
+  );
+}
+
+export function RegionChips({ value, onChange, includeOverseas = false, className = '' }) {
+  const regions = includeOverseas ? FEED_REGIONS : REGIONS;
+  const list = ['전체', ...regions];
+  return (
+    <div className={`flex gap-1.5 overflow-x-auto no-scrollbar ${className}`} aria-label="지역 필터">
+      {list.map((name) => {
+        const region = name === '전체' ? '' : name;
+        const active = value === region;
+        return (
+          <button
+            key={name}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(region)}
+            className={`h-8 px-3 rounded-md text-[13px] whitespace-nowrap border transition ${
+              active ? 'bg-blue-600 text-white border-blue-600 font-semibold' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-400'
+            }`}
+          >
+            {name}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export function RegionFilterGroup({ value, onChange, includeOverseas = false, showTitle = false, className = '' }) {
+  const regions = includeOverseas ? FEED_REGIONS : REGIONS;
+  const [open, setOpen] = useState(false);
+  const selected = regions.includes(value) ? value : '';
+  return (
+    <div className={`w-full max-w-[220px] ${className}`}>
+      {showTitle && <p className="mb-2 text-xs font-medium text-slate-400">해당 지역</p>}
+      <div className="relative">
+      <button type="button" aria-label="지역 필터" aria-expanded={open} onClick={() => setOpen((v) => !v)}
+        className="flex h-9 w-full items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 text-left text-[13px] text-slate-700 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-100">
+        <span className={selected ? '' : 'text-slate-400'}>{selected || '지역 선택'}</span>
+        <ChevronDown className={`h-4 w-4 shrink-0 text-slate-500 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-52 overflow-y-auto no-scrollbar rounded-lg border border-slate-200 bg-white p-1 shadow-lg" role="listbox" aria-label="지역 선택">
+          <button type="button" role="option" aria-selected={!selected} onClick={() => { onChange(''); setOpen(false); }}
+            className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm hover:bg-slate-50 ${!selected ? 'font-semibold text-blue-700' : 'text-slate-700'}`}>
+            전체 지역 {!selected && <Check className="h-4 w-4" />}
+          </button>
+          {regions.map((region) => (
+            <button key={region} type="button" role="option" aria-selected={selected === region} onClick={() => { onChange(region); setOpen(false); }}
+              className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm hover:bg-slate-50 ${selected === region ? 'font-semibold text-blue-700' : 'text-slate-700'}`}>
+              {region} {selected === region && <Check className="h-4 w-4" />}
+            </button>
+          ))}
+        </div>
+      )}
+      </div>
+    </div>
+  );
+}
+
+export function FilterSelect({ label, value, onChange, options, placeholder = '전체', className = '' }) {
+  return (
+    <label className={`flex min-w-0 items-center gap-2.5 ${className}`}>
+      <span className="w-[4.5rem] shrink-0 text-sm font-semibold text-slate-800">{label}</span>
+      <span className="relative min-w-0 flex-1">
+        <select value={value || ''} onChange={(event) => onChange(event.target.value)} aria-label={label}
+          className="h-11 w-full appearance-none rounded-lg border border-slate-300 bg-white px-4 pr-10 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+          <option value="">{placeholder}</option>
+          {options.map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>
+        <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600" />
+      </span>
+    </label>
   );
 }
 

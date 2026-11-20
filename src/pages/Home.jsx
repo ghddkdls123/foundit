@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Search } from 'lucide-react';
 import Layout from '../components/Layout';
 import ItemCard from '../components/ItemCard';
-import { CategoryChips, Empty, ErrorBox, SkeletonGrid } from '../components/ui';
+import { CategoryChips, Empty, ErrorBox, RegionFilterGroup, SkeletonGrid } from '../components/ui';
 import { api } from '../lib/api';
 import useSession from '../lib/useSession';
 
@@ -17,6 +17,7 @@ export default function Home() {
     searchRef.current?.focus();
   };
   const [category, setCategory] = useState('');
+  const [region, setRegion] = useState('');
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -35,7 +36,7 @@ export default function Home() {
     setLoading(true);
     setError('');
     // 넉넉히 받아서 사진 있는 것을 먼저 10개 보여줌
-    api('/feed', { query: { category, limit: 30 } })
+    api('/feed', { query: { category, region, limit: 30 } })
       .then((data) => {
         if (!alive) return;
         const list = data?.items ?? [];
@@ -47,7 +48,7 @@ export default function Home() {
     return () => {
       alive = false;
     };
-  }, [category, reload]);
+  }, [category, region, reload]);
 
   const onSearch = (e) => {
     e.preventDefault();
@@ -145,13 +146,22 @@ export default function Home() {
           </div>
           <button
             type="button"
-            onClick={() => navigate(category ? `/feed?category=${encodeURIComponent(category)}` : '/feed')}
+            onClick={() => {
+              const params = new URLSearchParams();
+              if (category) params.set('category', category);
+              if (region) params.set('region', region);
+              const query = params.toString();
+              navigate(query ? `/feed?${query}` : '/feed');
+            }}
             className="text-sm text-slate-500 hover:text-slate-900 shrink-0"
           >
             전체보기 →
           </button>
         </div>
-        <CategoryChips value={category} onChange={setCategory} />
+        <div className="grid grid-cols-1 sm:grid-cols-[220px_minmax(0,1fr)] gap-x-3 gap-y-1 items-start">
+          <RegionFilterGroup value={region} onChange={setRegion} includeOverseas />
+          <CategoryChips value={category} onChange={setCategory} />
+        </div>
 
         <div className="mt-5">
           {loading ? (
@@ -159,7 +169,7 @@ export default function Home() {
           ) : error ? (
             <ErrorBox message={error} onRetry={() => setReload((n) => n + 1)} />
           ) : items.length === 0 ? (
-            <Empty title="아직 등록된 습득물이 없어요" desc={category ? `'${category}' 분류에는 최근 30일 습득물이 없어요.` : undefined} />
+            <Empty title="아직 등록된 습득물이 없어요" desc={region ? `'${region}' 지역에는 최근 30일 습득물이 없어요.` : category ? `'${category}' 분류에는 최근 30일 습득물이 없어요.` : undefined} />
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-4 gap-y-6">
               {items.map((it) => (

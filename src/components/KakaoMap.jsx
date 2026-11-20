@@ -2,6 +2,17 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import { MapPinOff } from 'lucide-react';
 import { loadKakao, markerImage } from '../lib/kakao';
 
+let regionBoundaryRequest;
+function loadRegionBoundaries() {
+  if (!regionBoundaryRequest) {
+    regionBoundaryRequest = fetch('/data/regions.geojson').then((res) => {
+      if (!res.ok) throw new Error('지역 경계를 불러오지 못했습니다.');
+      return res.json();
+    });
+  }
+  return regionBoundaryRequest;
+}
+
 /**
  * 카카오맵 공통 컴포넌트
  * - markers: [{ id, lat, lng, kind: 'FOUND'|'LOST'|'ME', title }]
@@ -18,13 +29,14 @@ function distanceKm(lat1, lng1, lat2, lng2) {
 }
 
 const KakaoMap = forwardRef(function KakaoMap(
-  { center, level = 4, markers = [], onMarkerClick, pick, onPick, onIdle, interactive = true, className = '' },
+  { center, level = 4, markers = [], onMarkerClick, pick, onPick, onIdle, highlightRegion = '', interactive = true, className = '' },
   ref,
 ) {
   const boxRef = useRef(null);
   const mapRef = useRef(null);
   const kakaoRef = useRef(null);
   const markerObjs = useRef([]);
+  const regionObjs = useRef([]);
   const pickObj = useRef(null);
   const handlers = useRef({});
   const [error, setError] = useState('');
@@ -191,6 +203,7 @@ const KakaoMap = forwardRef(function KakaoMap(
           handlers.current.onIdle?.({ minLat: sw.getLat(), maxLat: ne.getLat(), minLng: sw.getLng(), maxLng: ne.getLng() });
         };
         kakao.maps.event.addListener(map, 'idle', emitIdle);
+        emitIdle();
         // 사용자가 지도를 직접 끌면 진행 중인 이동 애니메이션을 멈춤
         // 트랙패드: 두 손가락으로 밀면 이동, 핀치(ctrl+휠)는 확대·축소. 일반 마우스 휠은 확대·축소
         if (interactive) {
@@ -268,6 +281,44 @@ const KakaoMap = forwardRef(function KakaoMap(
       return marker;
     });
   }, [ready, markers]);
+
+  useEffect(() => {
+    if (!ready || !highlightRegion) return undefined;
+    let cancelled = false;
+    const timers = [];
+    const overlays = [];
+    loadRegionBoundaries()
+      .then((data) => {
+        if (cancelled) return;
+        const feature = data.features?.find((f) => f.properties?.region === highlightRegion);
+        if (!feature) return;
+        const kakao = kakaoRef.current;
+        for (const polygon of feature.geometry.coordinates) {
+          const path = polygon.map((ring) => ring.map(([lng, lat]) => new kakao.maps.LatLng(lat, lng)));
+          const overlay = new kakao.maps.Polygon({
+            map: mapRef.current,
+            path,
+            strokeWeight: 4,
+            strokeColor: '#2563eb',
+            strokeOpacity: 0.95,
+            strokeStyle: 'solid',
+            fillColor: '#3b82f6',
+            fillOpacity: 0.24,
+            zIndex: 1,
+          });
+          overlays.push(overlay);
+        }
+        regionObjs.current = overlays;
+        timers.push(setTimeout(() => overlays.forEach((overlay) => overlay.setOptions({ strokeWeight: 2, strokeOpacity: 0.35, fillOpacity: 0.08 })), 2500));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      timers.forEach(clearTimeout);
+      overlays.forEach((overlay) => overlay.setMap(null));
+      if (regionObjs.current === overlays) regionObjs.current = [];
+    };
+  }, [ready, highlightRegion]);
 
   // 선택 핀
   useEffect(() => {

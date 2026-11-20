@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { Building2, Lock, MapPin } from 'lucide-react';
 import { timeAgo } from '../lib/format';
-import { toOurCategory } from '../lib/constants';
+import { REGION_LABEL, toOurCategory } from '../lib/constants';
 
 /** 서버 응답 3가지(피드 카드, 우리 게시글, 공공 습득물)를 한 모양으로 */
 export function normalizeItem(raw) {
@@ -17,6 +17,7 @@ export function normalizeItem(raw) {
       date: raw.date ?? raw.foundDate ?? '',
       img: raw.thumbnailUrl ?? raw.imageUrl ?? '',
       institution: '경찰청 유실물',
+      region: raw.region ?? '',
       status: 'OPEN',
       similarity: raw.similarity,
     };
@@ -34,6 +35,7 @@ export function normalizeItem(raw) {
     date: raw.date ?? raw.createdAt ?? '',
     img: raw.thumbnailUrl ?? '',
     institution: typeof raw.institution === 'string' ? raw.institution : raw.institution?.name ?? '',
+    region: raw.region ?? '',
     status: raw.status ?? 'OPEN',
     similarity: raw.similarity,
   };
@@ -79,6 +81,7 @@ export default function ItemCard({ item: raw, layout = 'grid' }) {
           <div className="flex items-center gap-1.5">
             <TypeBadge item={item} />
             {item.category && <span className="text-[11px] text-slate-400 truncate">{item.category}</span>}
+            {item.region && <span className="text-[11px] text-slate-400 truncate">{REGION_LABEL[item.region] || item.region}</span>}
             {typeof item.similarity === 'number' && (
               <span className="ml-auto text-[11px] font-bold text-emerald-600">유사도 {Math.round(item.similarity * 100)}%</span>
             )}
@@ -124,7 +127,7 @@ export default function ItemCard({ item: raw, layout = 'grid' }) {
           {item.institution && item.source === 'internal' ? <Building2 className="w-3 h-3 shrink-0" /> : <PlaceIcon className="w-3 h-3 shrink-0" />}
           {item.institution && item.source === 'internal' ? item.institution : placeText}
         </p>
-        <p className="text-[11px] text-slate-400 mt-0.5">{[item.category, timeAgo(item.date)].filter(Boolean).join(' · ')}</p>
+        <p className="text-[11px] text-slate-400 mt-0.5">{[item.region && (REGION_LABEL[item.region] || item.region), item.category, timeAgo(item.date)].filter(Boolean).join(' · ')}</p>
       </div>
     </button>
   );

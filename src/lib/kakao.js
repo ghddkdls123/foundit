@@ -2,6 +2,7 @@
 import { SCHOOL, SCHOOL_ADDRESS } from './constants';
 
 let loading = null;
+const addressCoordCache = new Map();
 
 /** 학교 주소 → 좌표 (지도를 처음 쓰기 전에 한 번). 찾으면 SCHOOL 값을 바꾸고 브라우저에 저장 */
 function resolveSchool(kakao) {
@@ -62,6 +63,27 @@ export async function coordToAddress(lat, lng) {
   } catch {
     return null;
   }
+}
+
+// 주소 → 좌표
+export function addressToCoord(address) {
+  const query = String(address ?? '').trim();
+  if (!query) return Promise.resolve(null);
+  if (addressCoordCache.has(query)) return addressCoordCache.get(query);
+  const request = loadKakao()
+    .then((kakao) => {
+      if (!kakao.maps.services) return null;
+      const geocoder = new kakao.maps.services.Geocoder();
+      return new Promise((resolve) => {
+        geocoder.addressSearch(query, (result, status) => {
+          if (status !== kakao.maps.services.Status.OK || !result[0]) return resolve(null);
+          resolve({ lat: Number(result[0].y), lng: Number(result[0].x) });
+        });
+      });
+    })
+    .catch(() => null);
+  addressCoordCache.set(query, request);
+  return request;
 }
 
 /** 장소 이름 검색 (예: "중앙도서관") */

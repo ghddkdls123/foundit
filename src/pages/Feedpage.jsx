@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowRight, Search, X } from 'lucide-react';
 import Layout from '../components/Layout';
 import ItemCard from '../components/ItemCard';
-import { Button, CategoryChips, Empty, ErrorBox, Segmented, SkeletonGrid } from '../components/ui';
+import { Button, CategoryChips, Empty, ErrorBox, RegionFilterGroup, Segmented, SkeletonGrid } from '../components/ui';
 import { api } from '../lib/api';
 
 const PAGE_SIZE = 20;
@@ -15,13 +15,14 @@ export default function FeedPage() {
   const tab = params.get('tab') === 'lost' ? 'lost' : 'found';
   const source = params.get('source') || 'all';
   const category = params.get('category') || '';
+  const region = params.get('region') || '';
   const keyword = params.get('keyword') || '';
 
   const [input, setInput] = useState(keyword);
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   // 검색 조건이 바뀌면 자동으로 1페이지부터
-  const filterKey = `${tab}|${source}|${category}|${keyword}`;
+  const filterKey = `${tab}|${source}|${category}|${region}|${keyword}`;
   const [pageState, setPageState] = useState({ key: filterKey, page: 1 });
   const page = pageState.key === filterKey ? pageState.page : 1;
   const nextPage = () => setPageState({ key: filterKey, page: page + 1 });
@@ -44,8 +45,8 @@ export default function FeedPage() {
     setError('');
     const req =
       tab === 'found'
-        ? api('/feed', { query: { source, category, keyword, page, limit: PAGE_SIZE } })
-        : api('/items', { query: { type: 'LOST', category, keyword, page, limit: PAGE_SIZE } });
+        ? api('/feed', { query: { source, category, keyword, region, page, limit: PAGE_SIZE } })
+        : api('/items', { query: { type: 'LOST', category, keyword, region, page, limit: PAGE_SIZE } });
     req
       .then((data) => {
         if (!alive) return;
@@ -58,7 +59,7 @@ export default function FeedPage() {
     return () => {
       alive = false;
     };
-  }, [tab, source, category, keyword, page, reload]);
+  }, [tab, source, category, region, keyword, page, reload]);
 
   const onSubmit = (e) => {
     e.preventDefault();
@@ -98,7 +99,16 @@ export default function FeedPage() {
         <Segmented
           className="md:flex-1"
           value={tab}
-          onChange={(v) => setParam('tab', v === 'lost' ? 'lost' : '')}
+          onChange={(v) => {
+            const next = new URLSearchParams(params);
+            if (v === 'lost') {
+              next.set('tab', 'lost');
+              if (region === '해외') next.delete('region');
+            } else {
+              next.delete('tab');
+            }
+            setParams(next, { replace: true });
+          }}
           options={[
             { value: 'found', label: '습득물 (주운 물건)', activeClass: 'text-blue-600' },
             { value: 'lost', label: '분실물 (찾는 물건)', activeClass: 'text-amber-600' },
@@ -128,10 +138,11 @@ export default function FeedPage() {
         </form>
       </div>
 
-      <div className="mt-4 flex flex-col lg:flex-row lg:items-center gap-3">
-        <CategoryChips className="flex-1" value={category} onChange={(v) => setParam('category', v)} />
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+        <RegionFilterGroup className="sm:w-[220px]" value={region} onChange={(v) => setParam('region', v)} includeOverseas={tab === 'found'} />
+        <CategoryChips className="min-w-0 flex-1" value={category} onChange={(v) => setParam('category', v)} />
         {tab === 'found' && (
-          <div className="flex gap-1 text-xs shrink-0">
+          <div className="flex shrink-0 gap-1 text-xs">
             {[
               ['all', '전체 출처'],
               ['internal', 'Foundit 등록'],

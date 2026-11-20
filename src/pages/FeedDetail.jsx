@@ -7,7 +7,7 @@ import ItemCard from '../components/ItemCard';
 import { NoSimilarNotice, SimilarityHelp } from '../components/SimilarityHelp';
 import { Button, ErrorBox, Field, Spinner, inputClass } from '../components/ui';
 import { api } from '../lib/api';
-import { CATEGORIES, MIN_SIMILARITY, STATUS_LABEL } from '../lib/constants';
+import { CATEGORIES, MIN_SIMILARITY, REGIONS, REGION_LABEL, STATUS_LABEL } from '../lib/constants';
 import { fullDate } from '../lib/format';
 import useSession from '../lib/useSession';
 import { toast } from '../lib/toast';
@@ -81,6 +81,7 @@ export default function FeedDetail() {
       category: item.category,
       place: placeValue ?? '',
       content: item.content ?? '',
+      region: item.region ?? '',
     });
     setEditing(true);
     setMenuOpen(false);
@@ -94,10 +95,11 @@ export default function FeedDetail() {
         title: form.title.trim(),
         category: form.category,
         content: form.content.trim() || undefined,
+        region: form.region || null,
         [isFound ? 'storageLocation' : 'lostLocation']: form.place.trim() || undefined,
       };
       const updated = await api(`/items/${id}`, { method: 'PATCH', body });
-      setItem((prev) => ({ ...prev, ...updated }));
+      setItem((prev) => ({ ...prev, ...updated, region: form.region || null }));
       setEditing(false);
       toast.success('수정되었습니다');
     } catch (e) {
@@ -265,6 +267,21 @@ export default function FeedDetail() {
                   <select className={inputClass} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
                     {[...new Set([...CATEGORIES, item.category])].map((c) => <option key={c}>{c}</option>)}
                   </select>
+                </dd>
+              </div>
+            )}
+            {(editing || item.region) && (
+              <div className="py-3 grid grid-cols-[96px_1fr] gap-3">
+                <dt className="text-slate-500">지역</dt>
+                <dd>
+                  {editing ? (
+                    <select className={inputClass} value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })}>
+                      <option value="">지역 선택 안 함</option>
+                      {REGIONS.map((r) => <option key={r} value={r}>{REGION_LABEL[r] || r}</option>)}
+                    </select>
+                  ) : (
+                    <span className="font-medium text-slate-900">{REGION_LABEL[item.region] || item.region}</span>
+                  )}
                 </dd>
               </div>
             )}

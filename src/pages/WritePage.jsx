@@ -5,7 +5,7 @@ import Layout from '../components/Layout';
 import KakaoMap from '../components/KakaoMap';
 import { Button, Field, Segmented, inputClass } from '../components/ui';
 import { api, uploadItemImage } from '../lib/api';
-import { CATEGORIES, REGIONS, REGION_CENTERS, SCHOOL, shortRegion } from '../lib/constants';
+import { CATEGORIES, REGIONS, REGION_CENTERS, REGION_LABEL, SCHOOL, shortRegion } from '../lib/constants';
 import { coordToAddress, loadKakao } from '../lib/kakao';
 import PlaceSearch from '../components/PlaceSearch';
 import { getMyLocation } from '../lib/geo';
@@ -107,10 +107,14 @@ export default function WritePage() {
     setSubmitting(true);
     setProgress('게시글 등록 중...');
     try {
+      const pinAddress = await coordToAddress(pos.lat, pos.lng);
+      const pinRegion = shortRegion(pinAddress?.region1);
+      const itemRegion = isFound ? (REGIONS.includes(pinRegion) ? pinRegion : REGIONS.includes(region) ? region : '') : region;
       const body = {
         title: title.trim(),
         type,
         category,
+        ...(itemRegion ? { region: itemRegion } : {}),
         locationLat: pos.lat,
         locationLng: pos.lng,
         content: content.trim() || undefined,
@@ -244,7 +248,7 @@ export default function WritePage() {
             <Field label="잃어버린 지역" hint="이 지역의 경찰청 유실물을 함께 찾아드려요. 지도 핀을 옮기면 자동으로 바뀌어요.">
               <select className={inputClass} value={region} onChange={(e) => onRegionChange(e.target.value)}>
                 <option value="">지역을 골라주세요</option>
-                {REGIONS.map((r) => <option key={r}>{r}</option>)}
+                {REGIONS.map((r) => <option key={r} value={r}>{REGION_LABEL[r] || r}</option>)}
               </select>
             </Field>
           )}
