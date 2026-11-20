@@ -5,6 +5,8 @@ import {
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import ItemCard from '../components/ItemCard';
+import ItemNotesButton from '../components/ItemNotesButton';
+import AdminDashboard from './AdminDashboard';
 import { Button, Empty, ErrorBox, Field, Segmented, Spinner, inputClass } from '../components/ui';
 import { api, clearSession, saveSession } from '../lib/api';
 import useSession from '../lib/useSession';
@@ -202,7 +204,7 @@ export default function MyPage() {
   const unread = useUnread();
   const [me, setMe] = useState(null);
   const [meError, setMeError] = useState('');
-  const [tab, setTab] = useState('mine'); // mine | org
+  const [tab, setTab] = useState('mine'); // dashboard | mine | org
   const [typeFilter, setTypeFilter] = useState('');
   const [list, setList] = useState({ loading: true, items: [], error: '' });
   const [modal, setModal] = useState(''); // name | password | withdraw
@@ -210,6 +212,7 @@ export default function MyPage() {
 
   const applyMe = (d) => {
     setMe(d);
+    if (d.role === 'ORG_ADMIN') setTab('dashboard');
     // 헤더 이름 등도 서버 값으로 맞춤
     saveSession({ name: d.name ?? '', email: d.email ?? '', emailVerified: !!d.emailVerified });
   };
@@ -230,6 +233,7 @@ export default function MyPage() {
   const isUser = me?.role === 'USER';
 
   useEffect(() => {
+    if (tab === 'dashboard') return undefined;
     let alive = true;
     setList((l) => ({ ...l, loading: true, error: '' }));
     api(tab === 'org' ? '/items/org' : '/items/mine', { query: { type: typeFilter, limit: 30 } })
@@ -298,7 +302,7 @@ export default function MyPage() {
             </div>
           </section>
 
-          <section className="grid grid-cols-2 border border-slate-200 rounded-lg divide-x divide-slate-200">
+          {me && !isOrgAdmin && <section className="grid grid-cols-2 border border-slate-200 rounded-lg divide-x divide-slate-200">
             {[
               ['FOUND', '내 습득물', 'text-blue-600', me?.stats?.found],
               ['LOST', '내 분실물', 'text-amber-600', me?.stats?.lost],
@@ -316,7 +320,7 @@ export default function MyPage() {
                 <p className={`text-xl font-bold ${color}`}>{n ?? '–'}<span className="text-xs font-medium text-slate-400 ml-0.5">건</span></p>
               </button>
             ))}
-          </section>
+          </section>}
 
           <section className="border border-slate-200 rounded-lg divide-y divide-slate-100 overflow-hidden">
             <Row
@@ -379,11 +383,16 @@ export default function MyPage() {
               value={tab}
               onChange={setTab}
               options={[
+                { value: 'dashboard', label: '기관 대시보드' },
                 { value: 'mine', label: '내가 쓴 글' },
                 { value: 'org', label: '우리 기관 전체' },
               ]}
             />
           )}
+          {isOrgAdmin && tab === 'dashboard' ? (
+            <AdminDashboard institution={me?.institution} />
+          ) : (
+          <>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-bold text-slate-900">
               {tab === 'org' ? '우리 기관 게시글' : '내가 쓴 글'}
@@ -419,8 +428,15 @@ export default function MyPage() {
             />
           ) : (
             <div className="grid sm:grid-cols-2 gap-2">
-              {list.items.map((it) => <ItemCard key={it.id} item={it} layout="row" />)}
+              {list.items.map((it) => <div key={it.id} className="flex min-w-0 items-center gap-1.5">
+                <div className="relative min-w-0 flex-1">
+                  <ItemCard item={it} layout="row" className="pr-12" />
+                  <ItemNotesButton item={it} compact className="absolute right-2.5 top-2.5 mt-0" />
+                </div>
+              </div>)}
             </div>
+          )}
+          </>
           )}
         </section>
       </div>

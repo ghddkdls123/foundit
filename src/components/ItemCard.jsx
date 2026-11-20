@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { Building2, Lock, MapPin } from 'lucide-react';
 import { timeAgo } from '../lib/format';
+import { isLocallyReturned } from '../lib/localItemStatus';
 import { REGION_LABEL, toOurCategory } from '../lib/constants';
 
 /** 서버 응답 3가지(피드 카드, 우리 게시글, 공공 습득물)를 한 모양으로 */
@@ -36,7 +37,7 @@ export function normalizeItem(raw) {
     img: raw.thumbnailUrl ?? '',
     institution: typeof raw.institution === 'string' ? raw.institution : raw.institution?.name ?? '',
     region: raw.region ?? '',
-    status: raw.status ?? 'OPEN',
+    status: isLocallyReturned(raw.id) ? 'RETURNED' : raw.status ?? 'OPEN',
     similarity: raw.similarity,
   };
 }
@@ -52,7 +53,7 @@ function TypeBadge({ item }) {
   );
 }
 
-export default function ItemCard({ item: raw, layout = 'grid' }) {
+export default function ItemCard({ item: raw, layout = 'grid', className = '' }) {
   const navigate = useNavigate();
   const item = normalizeItem(raw);
   const placeText = item.place || (item.placeHidden ? '보관 장소 비공개' : '장소 정보 없음');
@@ -69,7 +70,7 @@ export default function ItemCard({ item: raw, layout = 'grid' }) {
       <button
         type="button"
         onClick={() => navigate(item.href)}
-        className="w-full flex gap-3 p-2.5 bg-white rounded-lg border border-slate-200 hover:border-slate-400 transition text-left"
+        className={`w-full flex gap-3 p-2.5 bg-white rounded-lg border border-slate-200 hover:border-slate-400 transition text-left ${className}`}
       >
         <div className="relative w-20 h-20 shrink-0 rounded-md bg-slate-100 overflow-hidden flex items-center justify-center">
           {item.img ? <img src={item.img} alt="" className="w-full h-full object-cover" loading="lazy" /> : noPhoto(false)}
@@ -101,7 +102,7 @@ export default function ItemCard({ item: raw, layout = 'grid' }) {
     <button
       type="button"
       onClick={() => navigate(item.href)}
-      className="group flex flex-col text-left"
+      className={`group flex flex-col text-left ${className}`}
     >
       <div className="relative w-full aspect-[4/3] bg-slate-100 rounded-lg overflow-hidden flex items-center justify-center border border-slate-200">
         {item.img ? (

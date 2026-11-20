@@ -63,7 +63,7 @@ export default function MapPage() {
     let alive = true;
     setLoading(true);
     const request = region
-      ? api('/items', { query: { region, type, category, page: 1, limit: 200 } })
+      ? api('/items', { query: { region, type, category, page: 1, limit: 50 } })
       : api('/items/map', { query: { ...requestBounds, type, category } });
     request
       .then((d) => {

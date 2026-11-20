@@ -7,10 +7,17 @@ import ItemCard from '../components/ItemCard';
 import { NoSimilarNotice, SimilarityHelp } from '../components/SimilarityHelp';
 import { Button, ErrorBox, Field, Spinner, inputClass } from '../components/ui';
 import { api } from '../lib/api';
+import { isLocallyReturned, LOCAL_ITEM_STATUS_EVENT } from '../lib/localItemStatus';
 import { CATEGORIES, MIN_SIMILARITY, REGIONS, REGION_LABEL, STATUS_LABEL } from '../lib/constants';
 import { fullDate } from '../lib/format';
 import useSession from '../lib/useSession';
 import { toast } from '../lib/toast';
+
+function noteDateLabel(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+}
 
 export default function FeedDetail() {
   const { id } = useParams();
@@ -25,6 +32,13 @@ export default function FeedDetail() {
   const [form, setForm] = useState({});
   const [saving, setSaving] = useState(false);
   const [similar, setSimilar] = useState({ ready: true, items: [] });
+  const [noteData, setNoteData] = useState(null);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [notesError, setNotesError] = useState('');
+  const [noteScope, setNoteScope] = useState('PRIVATE');
+  const [noteText, setNoteText] = useState('');
+  const [noteSubmitting, setNoteSubmitting] = useState(false);
+  const [deletingNoteId, setDeletingNoteId] = useState(null);
   const [askOpen, setAskOpen] = useState(false); // "작성자에게 문의하기" 안내 창
   const [asking, setAsking] = useState(false);
   const menuRef = useRef(null);
@@ -34,7 +48,7 @@ export default function FeedDetail() {
     setLoading(true);
     setError('');
     api(`/items/${id}`)
-      .then((data) => alive && setItem(data))
+      .then((data) => alive && setItem(isLocallyReturned(data?.id) ? { ...data, status: 'RETURNED' } : data))
       .catch((e) => alive && setError(e.status === 404 ? '게시글을 찾을 수 없어요. 삭제되었을 수 있어요.' : e.message))
       .finally(() => alive && setLoading(false));
     // 사진 분석(임베딩)이 아직이면 4초마다 다시 확인 (최대 약 40초)
@@ -54,6 +68,38 @@ export default function FeedDetail() {
       alive = false;
       clearTimeout(timer);
     };
+  }, [id, session?.userId]);
+
+  useEffect(() => {
+    const updateLocalStatus = (event) => {
+      if (String(event.detail?.itemId) !== String(id) || event.detail?.status !== 'RETURNED') return;
+      setItem((current) => current ? { ...current, status: 'RETURNED' } : current);
+    };
+    window.addEventListener(LOCAL_ITEM_STATUS_EVENT, updateLocalStatus);
+    return () => window.removeEventListener(LOCAL_ITEM_STATUS_EVENT, updateLocalStatus);
+  }, [id]);
+
+  useEffect(() => {
+    if (!session?.userId) {
+      setNoteData(null);
+      setNotesError('');
+      return undefined;
+    }
+    let alive = true;
+    setNotesLoading(true);
+    setNotesError('');
+    api(`/items/${id}/notes`)
+      .then((data) => {
+        if (!alive) return;
+        setNoteData({
+          canWriteInstitution: data?.canWriteInstitution === true,
+          private: Array.isArray(data?.private) ? data.private : [],
+          institution: Array.isArray(data?.institution) ? data.institution : [],
+        });
+      })
+      .catch((e) => alive && setNotesError(e.message))
+      .finally(() => alive && setNotesLoading(false));
+    return () => { alive = false; };
   }, [id, session?.userId]);
 
   useEffect(() => {
@@ -163,6 +209,7 @@ export default function FeedDetail() {
   );
 
   const images = item.imageUrls ?? [];
+  const visibleNotes = noteScope === 'INSTITUTION' ? noteData?.institution ?? [] : noteData?.private ?? [];
 
   const openAsk = () => {
     if (!session) {
@@ -186,6 +233,46 @@ export default function FeedDetail() {
       }
     } finally {
       setAsking(false);
+    }
+  };
+
+  const submitNote = async (e) => {
+    e.preventDefault();
+    const content = noteText.trim();
+    if (!content || content.length > 1000 || noteSubmitting) return;
+    setNoteSubmitting(true);
+    try {
+      await api(`/items/${id}/notes`, { method: 'POST', body: { content, scope: noteScope } });
+      setNoteText('');
+      const data = await api(`/items/${id}/notes`);
+      setNoteData({
+        canWriteInstitution: data?.canWriteInstitution === true,
+        private: Array.isArray(data?.private) ? data.private : [],
+        institution: Array.isArray(data?.institution) ? data.institution : [],
+      });
+      toast.success('메모를 저장했어요');
+    } catch (e2) {
+      toast.error(e2.status === 429 ? '메모를 너무 자주 작성했어요. 잠시 후 다시 시도해주세요.' : e2.message);
+    } finally {
+      setNoteSubmitting(false);
+    }
+  };
+
+  const deleteNote = async (note) => {
+    if (!note.isMine || deletingNoteId != null) return;
+    setDeletingNoteId(note.id);
+    try {
+      await api(`/items/${id}/notes/${note.id}`, { method: 'DELETE' });
+      setNoteData((prev) => prev ? {
+        ...prev,
+        private: prev.private.filter((entry) => String(entry.id) !== String(note.id)),
+        institution: prev.institution.filter((entry) => String(entry.id) !== String(note.id)),
+      } : prev);
+      toast.success('메모를 삭제했어요');
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setDeletingNoteId(null);
     }
   };
 
@@ -349,6 +436,72 @@ export default function FeedDetail() {
           </div>
         </div>
       </div>
+
+      {!editing && (
+        <section className="mt-8 pt-6 border-t border-slate-200">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-bold text-slate-900">메모</h2>
+              <p className="mt-1 text-xs text-slate-500">내 메모는 나만 볼 수 있고, 기관 메모는 해당 기관 관리자에게만 보여요.</p>
+            </div>
+            {session && noteData?.canWriteInstitution && (
+              <div className="flex rounded-md border border-slate-200 p-0.5 text-xs">
+                <button type="button" onClick={() => setNoteScope('PRIVATE')} className={`rounded px-3 py-1.5 font-semibold ${noteScope === 'PRIVATE' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:text-slate-800'}`}>내 메모</button>
+                <button type="button" onClick={() => setNoteScope('INSTITUTION')} className={`rounded px-3 py-1.5 font-semibold ${noteScope === 'INSTITUTION' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}>기관 메모</button>
+              </div>
+            )}
+          </div>
+
+          {!session ? (
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 flex flex-wrap items-center justify-between gap-3">
+              <span>로그인하면 이 게시물에 나만 볼 수 있는 메모를 작성할 수 있어요.</span>
+              <Button variant="secondary" onClick={() => navigate('/login', { state: { from: `/feed/${id}` } })}>로그인</Button>
+            </div>
+          ) : notesLoading ? (
+            <p className="mt-4 text-sm text-slate-400">메모를 불러오는 중...</p>
+          ) : notesError ? (
+            <p className="mt-4 text-sm text-rose-600">메모를 불러오지 못했어요. {notesError}</p>
+          ) : noteData ? (
+            <>
+              <form onSubmit={submitNote} className="mt-4">
+                <textarea rows={3} maxLength={1000} value={noteText} onChange={(e) => setNoteText(e.target.value)}
+                  placeholder={noteScope === 'INSTITUTION' ? '기관 동료와 공유할 처리 기록을 적어주세요.' : '나만 볼 수 있는 메모를 적어주세요.'}
+                  className={`${inputClass} resize-y`} />
+                <div className="mt-2 flex items-center justify-between gap-3">
+                  <span className="text-[11px] text-slate-400">{noteText.length} / 1000자</span>
+                  <Button type="submit" disabled={!noteText.trim() || noteSubmitting} loading={noteSubmitting}>메모 저장</Button>
+                </div>
+              </form>
+
+              {visibleNotes.length === 0 ? (
+                <p className="mt-5 rounded-lg border border-dashed border-slate-200 p-5 text-center text-sm text-slate-400">
+                  {noteScope === 'INSTITUTION' ? '아직 기관 메모가 없어요.' : '아직 내 메모가 없어요.'}
+                </p>
+              ) : (
+                <ul className="mt-4 divide-y divide-slate-100 rounded-lg border border-slate-200">
+                  {visibleNotes.map((note) => (
+                    <li key={note.id} className="p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="text-[11px] text-slate-400">
+                          {noteScope === 'INSTITUTION' && <><span className="font-semibold text-slate-600">{note.authorName || '기관 관리자'}</span> · </>}
+                          {noteDateLabel(note.createdAt)}
+                        </p>
+                        {note.isMine === true && (
+                          <button type="button" onClick={() => deleteNote(note)} disabled={deletingNoteId === note.id}
+                            className="shrink-0 rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40" aria-label="메모 삭제" title="메모 삭제">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                      <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-800">{note.content}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          ) : null}
+        </section>
+      )}
 
       {!editing && (
         <section className="mt-10 pt-6 border-t border-slate-200">
