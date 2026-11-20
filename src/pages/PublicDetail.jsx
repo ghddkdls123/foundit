@@ -47,6 +47,11 @@ export default function PublicDetail() {
         </div>
 
         <div className="min-w-0">
+          {item.listed === false && (
+            <div role="status" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-800">
+              경찰청 목록에서 내려간 물건이에요. 이미 주인이 찾아갔을 수 있어요.
+            </div>
+          )}
           <div className="flex flex-wrap gap-1.5">
             <span className="text-[11px] font-bold px-1.5 py-0.5 rounded bg-slate-800 text-white">경찰청 유실물</span>
             <span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{toOurCategory(item.categoryMain)}</span>
