@@ -7,6 +7,7 @@ import Layout from '../components/Layout';
 import ItemCard from '../components/ItemCard';
 import ItemNotesButton from '../components/ItemNotesButton';
 import AdminDashboard from './AdminDashboard';
+import InstitutionVerificationDashboard from './InstitutionVerificationDashboard';
 import { Button, Empty, ErrorBox, Field, Segmented, Spinner, inputClass } from '../components/ui';
 import { api, clearSession, saveSession } from '../lib/api';
 import useSession from '../lib/useSession';
@@ -23,6 +24,15 @@ function formatNoteDate(value) {
   if (!value) return '';
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+function getPendingVerificationCount(data) {
+  const explicitCount = data?.pendingCount ?? data?.total ?? data?.count;
+  if (Number.isFinite(Number(explicitCount))) return Number(explicitCount);
+  if (Array.isArray(data)) return data.length;
+  if (Array.isArray(data?.items)) return data.items.length;
+  if (Array.isArray(data?.requests)) return data.requests.length;
+  return 0;
 }
 
 function Row({ Icon, title, desc, right, onClick, danger }) {
@@ -217,6 +227,7 @@ export default function MyPage() {
   const [notesPage, setNotesPage] = useState(1);
   const [notesReload, setNotesReload] = useState(0);
   const [notesList, setNotesList] = useState({ loading: false, items: [], total: 0, error: '' });
+  const [verificationPendingCount, setVerificationPendingCount] = useState(null);
   const [modal, setModal] = useState(''); // name | password | withdraw
   const [cooldown, startCooldown] = useCooldown();
 
@@ -240,10 +251,23 @@ export default function MyPage() {
   }, []);
 
   const isOrgAdmin = me?.role === 'ORG_ADMIN';
+  const isSuperAdmin = me?.role === 'SUPER_ADMIN';
   const isUser = me?.role === 'USER';
 
   useEffect(() => {
-    if (tab === 'dashboard' || tab === 'notes') return undefined;
+    if (!isSuperAdmin) {
+      setVerificationPendingCount(null);
+      return undefined;
+    }
+    let alive = true;
+    api('/admin/verification-requests')
+      .then((data) => alive && setVerificationPendingCount(getPendingVerificationCount(data)))
+      .catch(() => alive && setVerificationPendingCount(null));
+    return () => { alive = false; };
+  }, [isSuperAdmin]);
+
+  useEffect(() => {
+    if (tab === 'dashboard' || tab === 'notes' || tab === 'verifications') return undefined;
     let alive = true;
     setList((l) => ({ ...l, loading: true, error: '' }));
     api(tab === 'org' ? '/items/org' : '/items/mine', { query: { type: typeFilter, limit: 30 } })
@@ -322,7 +346,12 @@ export default function MyPage() {
             </div>
           </section>
 
-          {me && !isOrgAdmin && <section className="grid grid-cols-2 border border-slate-200 rounded-lg divide-x divide-slate-200">
+          {me && isSuperAdmin ? (
+            <button type="button" onClick={() => setTab('verifications')} className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3 text-left transition hover:border-blue-300 hover:bg-blue-50/40">
+              <span className="text-sm font-semibold text-slate-700">기관 인증 승인 대기</span>
+              <span className="shrink-0 text-right text-xl font-bold text-blue-600">{verificationPendingCount == null ? '–' : String(verificationPendingCount).padStart(2, '0')}<span className="ml-0.5 text-xs font-medium text-slate-400">건</span></span>
+            </button>
+          ) : me && !isOrgAdmin && <section className="grid grid-cols-2 border border-slate-200 rounded-lg divide-x divide-slate-200">
             {[
               ['FOUND', '내 습득물', 'text-blue-600', me?.stats?.found],
               ['LOST', '내 분실물', 'text-amber-600', me?.stats?.lost],
@@ -407,6 +436,10 @@ export default function MyPage() {
                 { value: 'mine', label: '내가 쓴 글' },
                 { value: 'org', label: '우리 기관 전체' },
                 { value: 'notes', label: '내 메모' },
+              ] : isSuperAdmin ? [
+                { value: 'mine', label: '내가 쓴 글' },
+                { value: 'notes', label: '내 메모' },
+                { value: 'verifications', label: '기관 인증 신청' },
               ] : [
                 { value: 'mine', label: '내가 쓴 글' },
                 { value: 'notes', label: '내 메모' },
@@ -415,6 +448,8 @@ export default function MyPage() {
           )}
           {isOrgAdmin && tab === 'dashboard' ? (
             <AdminDashboard institution={me?.institution} />
+          ) : isSuperAdmin && tab === 'verifications' ? (
+            <InstitutionVerificationDashboard onPendingCountChange={setVerificationPendingCount} />
           ) : tab === 'notes' ? (
             <section>
               <div className="mb-3 flex items-center justify-between gap-3">
