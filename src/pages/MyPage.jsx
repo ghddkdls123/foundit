@@ -8,6 +8,7 @@ import ItemCard from '../components/ItemCard';
 import ItemNotesButton from '../components/ItemNotesButton';
 import AdminDashboard from './AdminDashboard';
 import InstitutionVerificationDashboard from './InstitutionVerificationDashboard';
+import OrgAdminManagementDashboard from './OrgAdminManagementDashboard';
 import { Button, Empty, ErrorBox, Field, Segmented, Spinner, inputClass } from '../components/ui';
 import { api, clearSession, saveSession } from '../lib/api';
 import useSession from '../lib/useSession';
@@ -267,7 +268,7 @@ export default function MyPage() {
   }, [isSuperAdmin]);
 
   useEffect(() => {
-    if (tab === 'dashboard' || tab === 'notes' || tab === 'verifications') return undefined;
+    if (tab === 'dashboard' || tab === 'notes' || tab === 'verifications' || tab === 'orgAdmins') return undefined;
     let alive = true;
     setList((l) => ({ ...l, loading: true, error: '' }));
     api(tab === 'org' ? '/items/org' : '/items/mine', { query: { type: typeFilter, limit: 30 } })
@@ -419,7 +420,7 @@ export default function MyPage() {
                 <UserX className="w-3.5 h-3.5" /> 회원 탈퇴
               </button>
             ) : (
-              <p className="px-1 text-xs text-slate-400">{ROLE_LABEL[me.role] ?? '관리자'} 계정은 탈퇴하려면 운영자에게 요청해 주세요.</p>
+              <p className="px-1 text-xs leading-relaxed text-slate-400">기관 관리자 계정은 운영자에게 권한 해제를 요청한 뒤 탈퇴할 수 있습니다. 운영자 계정은 탈퇴할 수 없습니다.</p>
             )
           )}
         </aside>
@@ -440,6 +441,7 @@ export default function MyPage() {
                 { value: 'mine', label: '내가 쓴 글' },
                 { value: 'notes', label: '내 메모' },
                 { value: 'verifications', label: '기관 인증 신청' },
+                { value: 'orgAdmins', label: '기관 관리자 관리' },
               ] : [
                 { value: 'mine', label: '내가 쓴 글' },
                 { value: 'notes', label: '내 메모' },
@@ -450,6 +452,8 @@ export default function MyPage() {
             <AdminDashboard institution={me?.institution} />
           ) : isSuperAdmin && tab === 'verifications' ? (
             <InstitutionVerificationDashboard onPendingCountChange={setVerificationPendingCount} />
+          ) : isSuperAdmin && tab === 'orgAdmins' ? (
+            <OrgAdminManagementDashboard />
           ) : tab === 'notes' ? (
             <section>
               <div className="mb-3 flex items-center justify-between gap-3">
